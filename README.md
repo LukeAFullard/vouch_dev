@@ -55,7 +55,7 @@ vouch verify output.vch --data data.csv
 
 You can programmatically inspect the contents of a `.vch` file (which is a standard ZIP file) to view the `audit_log.json` and `environment.lock`.
 
-See [`examples/inspect_vch.py`](examples/inspect_vch.py) for a complete script.
+See the [**Inspection Walkthrough**](examples/INSPECTION_WALKTHROUGH.md) for a detailed example and output.
 
 ```bash
 python3 examples/inspect_vch.py
