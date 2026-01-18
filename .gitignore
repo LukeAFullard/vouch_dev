@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+*.vch
+test_artifacts/
+test_auditor_output/
+test_crypto_output/
