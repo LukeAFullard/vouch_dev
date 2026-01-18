@@ -49,6 +49,18 @@ with TraceSession("output.vch", private_key_path="my_identity"):
 vouch verify output.vch --data data.csv
 ```
 
+## Examples
+
+### Inspecting Audit Logs and Environment
+
+You can programmatically inspect the contents of a `.vch` file (which is a standard ZIP file) to view the `audit_log.json` and `environment.lock`.
+
+See the [**Inspection Walkthrough**](examples/INSPECTION_WALKTHROUGH.md) for a detailed example and output.
+
+```bash
+python3 examples/inspect_vch.py
+```
+
 ## Documentation
 
 *   [**Tutorial: Sending an Audit Package**](TUTORIAL.md) - A step-by-step guide for Analysts and Auditors.
