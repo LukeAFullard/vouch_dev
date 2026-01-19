@@ -114,7 +114,8 @@ def verify(args):
                      print(f"    [FAIL] Artifact Manifest Signature: Invalid ({e})")
                      sys.exit(1)
             else:
-                 print("    [WARN] Artifact Manifest Signature: Missing (Manifest not signed)")
+                 print("    [FAIL] Artifact Manifest Signature: Missing (Manifest not signed)")
+                 sys.exit(1)
 
             try:
                 with open(artifacts_json_path, "r") as f:
@@ -199,7 +200,7 @@ def gen_keys(args):
         private = args.name
         public = args.name + ".pub"
 
-    CryptoManager.generate_keys(private, public)
+    CryptoManager.generate_keys(private, public, password=args.password)
     print(f"Generated {private} and {public}")
 
 def main():
@@ -214,6 +215,7 @@ def main():
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
     gen_keys_parser.add_argument("--name", help="Base name for keys (default: id_rsa)")
+    gen_keys_parser.add_argument("--password", help="Password for private key encryption")
 
     args = parser.parse_args()
 

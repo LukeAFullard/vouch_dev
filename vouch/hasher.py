@@ -43,8 +43,18 @@ class Hasher:
                  row_hashes = pd.util.hash_pandas_object(obj, index=True)
                  hasher.update(row_hashes.values.tobytes())
              except Exception:
-                 # Fallback to string representation if something goes wrong
-                 hasher.update(str(obj).encode('utf-8'))
+                 try:
+                     # Fallback 1: Hash underlying values directly (if numpy backed)
+                     hasher.update(obj.values.tobytes())
+                 except Exception:
+                     try:
+                         # Fallback 2: JSON serialization (catches all data, avoids truncation)
+                         # Use default_handler=str to handle non-serializable objects reasonably
+                         json_str = obj.to_json(default_handler=str, date_format='iso')
+                         hasher.update(json_str.encode('utf-8'))
+                     except Exception:
+                        # Final Fallback to string representation
+                        hasher.update(str(obj).encode('utf-8'))
         elif HAS_PANDAS and isinstance(obj, np.ndarray):
             # Hash the raw bytes of the array
             # Ensure it's contiguous

@@ -14,13 +14,14 @@ from cryptography.hazmat.primitives import serialization
 class TraceSession:
     _active_session = None
 
-    def __init__(self, filename, strict=True, seed=None, private_key_path=None):
+    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None):
         self.filename = filename
         self.strict = strict
         self.seed = seed
         self.logger = Logger()
         self.temp_dir = None
         self.private_key_path = private_key_path
+        self.private_key_password = private_key_password
         self.artifacts = {} # Map arcname -> local_path
 
     def __enter__(self):
@@ -161,7 +162,10 @@ class TraceSession:
 
     def _sign_artifacts(self, log_path):
         try:
-            private_key = CryptoManager.load_private_key(self.private_key_path)
+            private_key = CryptoManager.load_private_key(
+                self.private_key_path,
+                password=self.private_key_password
+            )
 
             # Sign audit_log.json
             signature = CryptoManager.sign_file(private_key, log_path)
