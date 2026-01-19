@@ -20,8 +20,18 @@ class Auditor:
             target: The object to wrap.
             name: The name of the object (used in logs).
         """
-        self._target = target
-        self._name = name or getattr(target, "__name__", str(target))
+        # Prevent nested wrapping
+        if isinstance(target, Auditor):
+            self._target = target._target
+            # If name is not provided, inherit from existing wrapper?
+            # Or keep new name? Usually outer name is more relevant or same.
+            if name is None:
+                self._name = target._name
+            else:
+                self._name = name
+        else:
+            self._target = target
+            self._name = name or getattr(target, "__name__", str(target))
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ("_target", "_name"):
@@ -50,6 +60,11 @@ class Auditor:
         """Helper to deeply wrap results if they belong to tracked packages."""
         if result is None:
             return result
+
+        # Optimization: If the result is the target itself (chaining), return self.
+        # This preserves wrapper identity.
+        if result is self._target:
+            return self
 
         target_pkg = getattr(self._target, "__module__", "").split(".")[0]
         if not target_pkg and hasattr(self._target, "__package__"):
