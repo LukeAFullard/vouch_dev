@@ -61,6 +61,16 @@ See the [**Inspection Walkthrough**](examples/INSPECTION_WALKTHROUGH.md) for a d
 python3 examples/inspect_vch.py
 ```
 
+### Capturing Artifacts
+
+Vouch can bundle input and output files directly into the signed package, ensuring that the exact data used in an analysis is preserved and verified.
+
+See the [**Capture Artifacts Walkthrough**](examples/CAPTURE_WALKTHROUGH.md).
+
+```bash
+python3 examples/capture_artifacts_example.py
+```
+
 ## Documentation
 
 *   [**Tutorial: Sending an Audit Package**](TUTORIAL.md) - A step-by-step guide for Analysts and Auditors.

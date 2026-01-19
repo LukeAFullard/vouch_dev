@@ -58,7 +58,19 @@ def verify(args):
                 all_valid = True
 
                 for name, expected_hash in manifest.items():
+                    # Sanitize path to prevent traversal
+                    if os.path.isabs(name) or ".." in name:
+                        print(f"    [FAIL] Malformed artifact path: {name}")
+                        all_valid = False
+                        continue
+
                     artifact_path = os.path.join(data_dir, name)
+                    # Double check that we are still inside data_dir
+                    if not os.path.commonpath([os.path.abspath(artifact_path), os.path.abspath(data_dir)]) == os.path.abspath(data_dir):
+                         print(f"    [FAIL] Malformed artifact path (traversal): {name}")
+                         all_valid = False
+                         continue
+
                     if not os.path.exists(artifact_path):
                         print(f"    [FAIL] Missing artifact: {name}")
                         all_valid = False
@@ -74,9 +86,7 @@ def verify(args):
                 if all_valid:
                     print("  [OK] Captured Artifacts Integrity: Valid")
                 else:
-                    print("  [FAIL] Captured Artifacts Integrity: One or more files corrupted")
-                    # Should we exit 1 here? The core log is valid, but artifacts are wrong.
-                    # Let's count it as a failure.
+                    print("  [FAIL] Captured Artifacts Integrity: One or more files corrupted or missing")
                     sys.exit(1)
 
             except Exception as e:

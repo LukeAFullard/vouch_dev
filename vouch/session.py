@@ -80,6 +80,13 @@ class TraceSession:
         if arcname is None:
             arcname = os.path.basename(filepath)
 
+        # Security check for arcname
+        if os.path.isabs(arcname) or ".." in arcname:
+             if self.strict:
+                raise ValueError(f"Invalid artifact name: {arcname}. Must be relative path without '..'")
+             else:
+                return
+
         self.artifacts[arcname] = filepath
 
     @classmethod
@@ -110,6 +117,15 @@ class TraceSession:
 
         for name, src_path in self.artifacts.items():
             dst_path = os.path.join(data_dir, name)
+
+            # Double check destination is within data_dir
+            if not os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)]) == os.path.abspath(data_dir):
+                 print(f"Warning: Skipping artifact {name} (path traversal detected)")
+                 continue
+
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
             shutil.copy2(src_path, dst_path)
 
             # Hash the file
