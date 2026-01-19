@@ -196,53 +196,74 @@ class Auditor:
 
             # --- Pre-execution Hashing (Inputs) ---
             input_hashes = {}
-            if "read" in func_name or "load" in func_name:
-                 input_hashes = self._hash_arguments(func_name, args, kwargs)
+            try:
+                if "read" in func_name or "load" in func_name:
+                     input_hashes = self._hash_arguments(func_name, args, kwargs)
+            except Exception:
+                pass # Don't fail audit if hashing fails
+
+            full_name = f"{self._name}.{func_name}"
+            session = TraceSession.get_active_session()
 
             # --- Execute ---
-            result = func(*args, **kwargs)
+            try:
+                result = func(*args, **kwargs)
+            except Exception as e:
+                # Log exception
+                if session:
+                    session.logger.log_call(full_name, args, kwargs, None, extra_hashes=input_hashes, error=e)
+                raise
 
             # --- Post-execution Hashing (Outputs) ---
             output_hashes = {}
-            if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
-                 output_hashes = self._hash_arguments(func_name, args, kwargs)
+            try:
+                if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+                     output_hashes = self._hash_arguments(func_name, args, kwargs)
+            except Exception:
+                pass
 
             # Combine hashes
             extra_hashes = {**input_hashes, **output_hashes}
 
-            # Log if a session is active
-            full_name = f"{self._name}.{func_name}"
-            session = TraceSession.get_active_session()
+            # Log success
             if session:
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
             # Handle Async Coroutines
             if inspect.iscoroutine(result):
-                return self._wrap_coroutine(result, full_name)
+                return self._wrap_coroutine(result, full_name, args, kwargs)
 
             # Handle Generators
             if inspect.isgenerator(result):
-                return self._wrap_generator(result, full_name)
+                return self._wrap_generator(result, full_name, args, kwargs)
 
             return self._wrap_result(result, name_hint=f"{full_name}()")
 
         return wrapper
 
-    async def _wrap_coroutine(self, coro, name_hint):
+    async def _wrap_coroutine(self, coro, name_hint, args, kwargs):
         """Wrapper for async functions (coroutines)."""
+        session = TraceSession.get_active_session()
         try:
             result = await coro
+            # We could log success here too, but it might be noisy.
+            # Ideally we link it to original call.
             return self._wrap_result(result, name_hint=f"{name_hint} (async)")
-        except Exception:
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{name_hint} (async)", args, kwargs, None, error=e)
             raise
 
-    def _wrap_generator(self, gen, name_hint):
+    def _wrap_generator(self, gen, name_hint, args, kwargs):
         """Wrapper for generators."""
+        session = TraceSession.get_active_session()
         try:
             for item in gen:
                 yield self._wrap_result(item, name_hint=f"{name_hint} (yield)")
-        except Exception:
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{name_hint} (generator)", args, kwargs, None, error=e)
             raise
 
     # --- Proxy Dunder Methods ---
@@ -251,7 +272,30 @@ class Auditor:
         return self._wrap_result(self._target[self._unwrap(key)])
 
     def __setitem__(self, key, value):
-        self._target[self._unwrap(key)] = self._unwrap(value)
+        key = self._unwrap(key)
+        value = self._unwrap(value)
+        session = TraceSession.get_active_session()
+        try:
+            self._target[key] = value
+            if session:
+                # Log the modification
+                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None)
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None, error=e)
+            raise
+
+    def __delitem__(self, key):
+        key = self._unwrap(key)
+        session = TraceSession.get_active_session()
+        try:
+            del self._target[key]
+            if session:
+                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None)
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None, error=e)
+            raise
 
     def __len__(self):
         return len(self._target)
