@@ -41,12 +41,21 @@ def main():
         print("  - Adding artifact...")
         sess.add_artifact(data_path)
 
-    # 3. Generate Report
+    # 3. Generate Reports
     html_report = "example_report.html"
-    print(f"Generating report -> {html_report}")
-    Reporter.generate_report(vch_file, html_report)
+    print(f"Generating HTML report -> {html_report}")
+    Reporter.generate_report(vch_file, html_report, format="html")
 
-    print("Done! Check example_report.html")
+    md_report = "example_report.md"
+    print(f"Generating Markdown report -> {md_report}")
+    Reporter.generate_report(vch_file, md_report, format="md")
+
+    print("\n--- Markdown Report Content ---\n")
+    with open(md_report, 'r') as f:
+        print(f.read())
+    print("\n-------------------------------\n")
+
+    print(f"Done! Check {html_report} and {md_report}")
 
     # Clean up input file
     if os.path.exists(data_path):

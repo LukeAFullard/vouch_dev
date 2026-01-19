@@ -207,7 +207,7 @@ def gen_keys(args):
 def report(args):
     print(f"Generating report for {args.file}...")
     try:
-        Reporter.generate_report(args.file, args.output)
+        Reporter.generate_report(args.file, args.output, format=args.format)
         print(f"Report saved to {args.output}")
     except Exception as e:
         print(f"Error generating report: {e}")
@@ -228,9 +228,10 @@ def main():
     gen_keys_parser.add_argument("--password", help="Password for private key encryption")
 
     # report
-    report_parser = subparsers.add_parser("report", help="Generate an HTML report")
+    report_parser = subparsers.add_parser("report", help="Generate an HTML or Markdown report")
     report_parser.add_argument("file", help="Path to .vch file")
-    report_parser.add_argument("output", help="Path to output HTML file")
+    report_parser.add_argument("output", help="Path to output file")
+    report_parser.add_argument("--format", choices=["html", "md"], default="html", help="Report format (default: html)")
 
     args = parser.parse_args()
 

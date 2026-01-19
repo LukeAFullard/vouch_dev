@@ -50,6 +50,20 @@ class TestReporter(unittest.TestCase):
         self.assertIn("Session Summary", content)
         self.assertIn("Audit Log", content)
 
+    def test_generate_report_md(self):
+        md_path = os.path.join(self.test_dir, "report.md")
+        success = Reporter.generate_report(self.vch_path, md_path, format="md")
+        self.assertTrue(success)
+        self.assertTrue(os.path.exists(md_path))
+
+        with open(md_path, "r") as f:
+            content = f.read()
+
+        self.assertIn("# Vouch Audit Report", content)
+        self.assertIn("**File:**", content)
+        self.assertIn("test_function", content)
+        self.assertIn("artifact.txt", content)
+
     def test_cli_report_command(self):
         # Test via CLI wrapper simulation
         import subprocess

@@ -7,9 +7,12 @@ import datetime
 
 class Reporter:
     @staticmethod
-    def generate_report(vch_path, output_path):
+    def generate_report(vch_path, output_path, format="html"):
         if not os.path.exists(vch_path):
             raise FileNotFoundError(f"File not found: {vch_path}")
+
+        if format not in ["html", "md"]:
+            raise ValueError("Invalid format. Must be 'html' or 'md'")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
@@ -38,11 +41,14 @@ class Reporter:
                 with open(artifacts_path, 'r') as f:
                     artifacts = json.load(f)
 
-            # Generate HTML
-            html_content = Reporter._render_html(vch_path, audit_log, env_info, artifacts)
+            # Generate Output
+            if format == "html":
+                content = Reporter._render_html(vch_path, audit_log, env_info, artifacts)
+            else:
+                content = Reporter._render_md(vch_path, audit_log, env_info, artifacts)
 
             with open(output_path, 'w') as f:
-                f.write(html_content)
+                f.write(content)
 
             return True
 
@@ -149,3 +155,56 @@ class Reporter:
 </body>
 </html>
         """
+
+    @staticmethod
+    def _render_md(filename, log, env, artifacts):
+        # Calculate summary stats
+        start_time = log[0]['timestamp'] if log else "N/A"
+        end_time = log[-1]['timestamp'] if log else "N/A"
+        total_calls = len(log)
+
+        # Safe getters
+        python_ver = env.get('python_version', 'Unknown')
+        platform = env.get('platform', 'Unknown')
+
+        lines = []
+        lines.append(f"# Vouch Audit Report")
+        lines.append(f"**File:** `{os.path.basename(filename)}`\n")
+
+        lines.append("## Session Summary")
+        lines.append(f"- **Start Time:** {start_time}")
+        lines.append(f"- **End Time:** {end_time}")
+        lines.append(f"- **Total Operations:** {total_calls}")
+        lines.append("")
+
+        lines.append("## Environment")
+        lines.append(f"- **Python Version:** `{python_ver}`")
+        lines.append(f"- **Platform:** `{platform}`")
+        lines.append("")
+
+        lines.append("## Artifacts")
+        if artifacts:
+            for name, hash_val in artifacts.items():
+                lines.append(f"- **{name}**: `{hash_val}`")
+        else:
+            lines.append("No artifacts bundled.")
+        lines.append("")
+
+        lines.append("## Audit Log")
+
+        for entry in log:
+            seq = entry.get('sequence_number', '-')
+            ts = entry.get('timestamp', '')
+            target = entry.get('target', '')
+            args = str(entry.get('args_repr', []))
+            kwargs = str(entry.get('kwargs_repr', {}))
+            result = str(entry.get('result_repr', ''))
+
+            lines.append(f"### {seq}. {target}")
+            lines.append(f"- **Timestamp:** {ts}")
+            lines.append(f"- **Args:** `{args}`")
+            lines.append(f"- **Kwargs:** `{kwargs}`")
+            lines.append(f"- **Result:** `{result}`")
+            lines.append("")
+
+        return "\n".join(lines)
