@@ -141,8 +141,15 @@ class TraceSession:
         """
         manifest = {}
         data_dir = os.path.join(self.temp_dir, "data")
+        total = len(self.artifacts)
+        processed = 0
 
         for name, src_path in self.artifacts.items():
+            processed += 1
+            if total > 10 and (processed % 5 == 0 or processed == total):
+                sys.stdout.write(f"\rPackaging artifacts... {processed}/{total}")
+                sys.stdout.flush()
+
             dst_path = os.path.join(data_dir, name)
 
             # Double check destination is within data_dir
@@ -163,6 +170,9 @@ class TraceSession:
             # Hash the file
             file_hash = Hasher.hash_file(dst_path)
             manifest[name] = file_hash
+
+        if total > 10:
+             print() # Clear progress line
 
         with open(os.path.join(self.temp_dir, "artifacts.json"), "w") as f:
             json.dump(manifest, f, indent=2)
@@ -196,10 +206,15 @@ class TraceSession:
                 f.write(pem)
 
         except Exception as e:
+            msg = (
+                f"Failed to sign artifacts.\n"
+                f"  Key path: {self.private_key_path}\n"
+                f"  Error: {e}"
+            )
             if self.strict:
-                raise RuntimeError(f"Failed to sign artifacts: {e}")
+                raise RuntimeError(msg) from e
             else:
-                print(f"Warning: Failed to sign artifacts: {e}")
+                print(f"Warning: {msg}")
 
     def _package_artifacts(self):
         with zipfile.ZipFile(self.filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
