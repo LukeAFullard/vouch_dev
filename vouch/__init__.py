@@ -61,11 +61,17 @@ def record(filename=None, targets=None, **kwargs):
         def main(): ...
     """
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kw):
-            # If filename was not provided to @record, start() will auto-generate one
-            with start(filename, targets, **kwargs):
-                return func(*args, **kw)
+        import inspect
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args, **kw):
+                with start(filename, targets, **kwargs):
+                    return await func(*args, **kw)
+        else:
+            @wraps(func)
+            def wrapper(*args, **kw):
+                with start(filename, targets, **kwargs):
+                    return func(*args, **kw)
         return wrapper
 
     if callable(filename):

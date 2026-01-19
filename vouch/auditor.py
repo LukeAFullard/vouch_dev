@@ -1,6 +1,7 @@
 import functools
 import os
 import logging
+import inspect
 from typing import Any, Optional, Callable
 from .session import TraceSession
 from .hasher import Hasher
@@ -19,8 +20,18 @@ class Auditor:
             target: The object to wrap.
             name: The name of the object (used in logs).
         """
-        self._target = target
-        self._name = name or getattr(target, "__name__", str(target))
+        # Prevent nested wrapping
+        if isinstance(target, Auditor):
+            self._target = target._target
+            # If name is not provided, inherit from existing wrapper?
+            # Or keep new name? Usually outer name is more relevant or same.
+            if name is None:
+                self._name = target._name
+            else:
+                self._name = name
+        else:
+            self._target = target
+            self._name = name or getattr(target, "__name__", str(target))
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ("_target", "_name"):
@@ -34,6 +45,12 @@ class Auditor:
         else:
             delattr(self._target, name)
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def _unwrap(self, obj: Any) -> Any:
         if isinstance(obj, Auditor):
             return obj._target
@@ -43,6 +60,11 @@ class Auditor:
         """Helper to deeply wrap results if they belong to tracked packages."""
         if result is None:
             return result
+
+        # Optimization: If the result is the target itself (chaining), return self.
+        # This preserves wrapper identity.
+        if result is self._target:
+            return self
 
         target_pkg = getattr(self._target, "__module__", "").split(".")[0]
         if not target_pkg and hasattr(self._target, "__package__"):
@@ -75,7 +97,10 @@ class Auditor:
 
         attr = getattr(self._target, name)
 
-        # If it's a class/type, do NOT wrap it to preserve isinstance checks
+        # If it's a class/type, do NOT wrap it.
+        # Wrapping classes breaks pickling (identity check fails) and strict isinstance checks.
+        # This means constructor calls (e.g. pd.DataFrame()) are not intercepted,
+        # but the resulting objects are compatible with pickle and type checks.
         if isinstance(attr, type):
             return attr
 
@@ -84,7 +109,53 @@ class Auditor:
             return self._wrap_callable(attr, name)
 
         # Recursively wrap attributes that are part of the library (heuristic)
-        return Auditor(attr, name=f"{self._name}.{name}")
+        # Use _wrap_result logic to avoid wrapping primitives/builtins
+        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
+
+    def __call__(self, *args, **kwargs):
+        """
+        Support calling the wrapped object (e.g. for class constructors or functors).
+        """
+        func = self._target
+        func_name = self._name
+
+        # Reuse wrap_callable logic inline
+        args = tuple(self._unwrap(a) for a in args)
+        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
+
+        # Inputs hashing
+        input_hashes = {}
+        if "read" in func_name or "load" in func_name:
+             input_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        result = func(*args, **kwargs)
+
+        # Outputs hashing
+        output_hashes = {}
+        if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+             output_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        extra_hashes = {**input_hashes, **output_hashes}
+
+        session = TraceSession.get_active_session()
+        if session:
+            # If it's a class constructor, log it as such
+            if isinstance(self._target, type):
+                 full_name = f"{self._name}.__init__" # Approximate
+            else:
+                 full_name = f"{self._name}"
+
+            session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
+
+        # Handle Async Coroutines
+        if inspect.iscoroutine(result):
+            return self._wrap_coroutine(result, f"{self._name}()")
+
+        # Handle Generators
+        if inspect.isgenerator(result):
+            return self._wrap_generator(result, f"{self._name}()")
+
+        return self._wrap_result(result, name_hint=f"{self._name}()")
 
     def _hash_arguments(self, func_name, args, kwargs):
         """Helper to hash file paths found in arguments."""
@@ -140,15 +211,39 @@ class Auditor:
             extra_hashes = {**input_hashes, **output_hashes}
 
             # Log if a session is active
+            full_name = f"{self._name}.{func_name}"
             session = TraceSession.get_active_session()
             if session:
-                full_name = f"{self._name}.{func_name}"
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
+            # Handle Async Coroutines
+            if inspect.iscoroutine(result):
+                return self._wrap_coroutine(result, full_name)
+
+            # Handle Generators
+            if inspect.isgenerator(result):
+                return self._wrap_generator(result, full_name)
+
             return self._wrap_result(result, name_hint=f"{full_name}()")
 
         return wrapper
+
+    async def _wrap_coroutine(self, coro, name_hint):
+        """Wrapper for async functions (coroutines)."""
+        try:
+            result = await coro
+            return self._wrap_result(result, name_hint=f"{name_hint} (async)")
+        except Exception:
+            raise
+
+    def _wrap_generator(self, gen, name_hint):
+        """Wrapper for generators."""
+        try:
+            for item in gen:
+                yield self._wrap_result(item, name_hint=f"{name_hint} (yield)")
+        except Exception:
+            raise
 
     # --- Proxy Dunder Methods ---
 
@@ -163,6 +258,24 @@ class Auditor:
 
     def __iter__(self):
         return iter(self._target)
+
+    def __bool__(self):
+        return bool(self._target)
+
+    def __enter__(self):
+        return self._wrap_result(self._target.__enter__(), f"{self._name}.__enter__")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._target.__exit__(exc_type, exc_val, exc_tb)
+
+    def __await__(self):
+        return self._target.__await__()
+
+    def __aiter__(self):
+        return self._wrap_result(self._target.__aiter__(), f"{self._name}.__aiter__")
+
+    async def __anext__(self):
+        return self._wrap_result(await self._target.__anext__(), f"{self._name}.__anext__")
 
     def __str__(self):
         return str(self._target)
@@ -245,6 +358,9 @@ class Auditor:
     # Comparison
     def __eq__(self, other):
         return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
+
+    def __hash__(self):
+        return hash(self._target)
 
     def __ne__(self, other):
         return self._wrap_result(self._target != self._unwrap(other), f"{self._name} != {other}")

@@ -23,8 +23,6 @@ def test_cross_module_imports():
         # Calling function should work and use wrapped pandas
         df = dummy_utils.load_data()
         assert isinstance(df, Auditor) or isinstance(df, pd.DataFrame)
-        # Note: df might be unwrapped if it comes from class constructor (Limitation 3/Constructor)
-        # But dummy_utils.pd is wrapped.
 
 def test_cross_library_returns():
     # Limitation 2 fix verification
