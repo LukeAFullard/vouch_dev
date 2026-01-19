@@ -2,6 +2,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.exceptions import InvalidSignature
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+import datetime
 import os
 
 class CryptoManager:
@@ -10,9 +13,9 @@ class CryptoManager:
     """
 
     @staticmethod
-    def generate_keys(private_key_path, public_key_path, password=None):
+    def generate_keys(private_key_path, public_key_path, password=None, cert_path=None, days=365):
         """
-        Generates a new RSA key pair and saves them to disk.
+        Generates a new RSA key pair and optionally a self-signed certificate.
         """
         private_key = rsa.generate_private_key(
             public_exponent=65537,
@@ -36,12 +39,40 @@ class CryptoManager:
 
         public_key = private_key.public_key()
 
-        # Save public key
+        # Save public key (raw)
         with open(public_key_path, "wb") as f:
             f.write(public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             ))
+
+        # Generate Certificate if requested
+        if cert_path:
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COUNTRY_NAME, u"XX"),
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"Vouch Audit"),
+                x509.NameAttribute(NameOID.LOCALITY_NAME, u"Vouch"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Vouch User"),
+                x509.NameAttribute(NameOID.COMMON_NAME, u"vouch-generated-cert"),
+            ])
+            cert = x509.CertificateBuilder().subject_name(
+                subject
+            ).issuer_name(
+                issuer
+            ).public_key(
+                public_key
+            ).serial_number(
+                x509.random_serial_number()
+            ).not_valid_before(
+                datetime.datetime.now(datetime.timezone.utc)
+            ).not_valid_after(
+                datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)
+            ).add_extension(
+                x509.BasicConstraints(ca=True, path_length=None), critical=True,
+            ).sign(private_key, hashes.SHA256())
+
+            with open(cert_path, "wb") as f:
+                f.write(cert.public_bytes(serialization.Encoding.PEM))
 
     @staticmethod
     def load_private_key(path, password=None):
@@ -69,10 +100,29 @@ class CryptoManager:
 
     @staticmethod
     def load_public_key(path):
-        with open(path, "rb") as key_file:
-            return serialization.load_pem_public_key(
-                key_file.read()
-            )
+        """
+        Loads a public key from PEM file. Supports both raw Public Keys and X.509 Certificates.
+        """
+        with open(path, "rb") as f:
+            data = f.read()
+
+        try:
+            return serialization.load_pem_public_key(data)
+        except ValueError:
+            # Try loading as certificate
+            try:
+                cert = x509.load_pem_x509_certificate(data)
+
+                # Check expiry if it is a cert
+                now = datetime.datetime.now(datetime.timezone.utc)
+                if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
+                    # We print a warning but still return the key for verification
+                    # (Strict verification logic handles policy)
+                    print(f"Warning: Certificate is expired or not yet valid (Valid: {cert.not_valid_before_utc} to {cert.not_valid_after_utc})")
+
+                return cert.public_key()
+            except ValueError:
+                raise ValueError(f"Could not deserialize key/certificate from {path}")
 
     @staticmethod
     def sign_file(private_key, filepath):

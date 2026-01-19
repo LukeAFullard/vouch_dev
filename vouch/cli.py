@@ -331,6 +331,8 @@ def main():
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
     gen_keys_parser.add_argument("--name", help="Base name for keys (default: id_rsa)")
     gen_keys_parser.add_argument("--password", help="Password for private key encryption")
+    gen_keys_parser.add_argument("--cert", action="store_true", help="Generate an X.509 certificate instead of raw public key")
+    gen_keys_parser.add_argument("--days", type=int, default=365, help="Validity period for certificate in days (default: 365)")
 
     # report
     report_parser = subparsers.add_parser("report", help="Generate an HTML or Markdown report")
