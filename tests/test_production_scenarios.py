@@ -80,3 +80,29 @@ class TestProductionScenarios(unittest.TestCase):
 
         # Outside, it should be restored (unless it was already wrapped before, which it wasn't)
         self.assertFalse(isinstance(sys.modules['json'], Auditor), "json module should be unwrapped")
+
+    def test_artifact_size_limit(self):
+        large_file = os.path.join(self.test_dir, "large.txt")
+        with open(large_file, 'w') as f:
+            f.write("A" * 1024) # 1KB
+
+        # Test with strict mode (should raise)
+        with TraceSession(self.vch_path, strict=True, max_artifact_size=512) as sess:
+            with self.assertRaisesRegex(ValueError, "Artifact exceeds maximum size"):
+                sess.add_artifact(large_file)
+
+        # Test with non-strict mode (should warn but not crash, although add_artifact doesn't return anything)
+        # The skipping happens during processing (__exit__), but we can't easily assert print output here without patching stdout.
+        # But we can verify it's NOT in the zip.
+
+        vch_path2 = os.path.join(self.test_dir, "test2.vch")
+        with TraceSession(vch_path2, strict=False, max_artifact_size=512) as sess:
+            # add_artifact won't raise in strict=False for size?
+            # Wait, my implementation raises in add_artifact ONLY if strict=True.
+            # If strict=False, it adds to the list, but _process_artifacts skips it.
+            sess.add_artifact(large_file)
+
+        # Verify it's not in the zip
+        import zipfile
+        with zipfile.ZipFile(vch_path2, 'r') as z:
+            self.assertNotIn("data/large.txt", z.namelist())

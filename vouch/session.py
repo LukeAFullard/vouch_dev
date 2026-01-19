@@ -33,7 +33,8 @@ class TraceSession:
         private_key_path: Optional[str] = None,
         private_key_password: Optional[str] = None,
         capture_script: bool = True,
-        auto_track_io: bool = False
+        auto_track_io: bool = False,
+        max_artifact_size: int = 1024 * 1024 * 1024
     ):
         """
         Initialize the TraceSession.
@@ -46,6 +47,7 @@ class TraceSession:
             private_key_password: Password for the private key.
             capture_script: If True, captures the calling script as an artifact.
             auto_track_io: If True, hooks builtins.open to track all file reads.
+            max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
         """
         self.filename = filename
         self.strict = strict
@@ -56,6 +58,7 @@ class TraceSession:
         self.private_key_password = private_key_password
         self.capture_script = capture_script
         self.auto_track_io = auto_track_io
+        self.max_artifact_size = max_artifact_size
         self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
         self._original_open: Optional[Any] = None
         self._in_tracked_open = False
@@ -135,12 +138,15 @@ class TraceSession:
 
         Raises:
             FileNotFoundError: If strict mode is on and file is missing.
-            ValueError: If arcname contains path traversal characters.
+            ValueError: If arcname contains path traversal characters or file exceeds max size.
         """
         if not os.path.exists(filepath):
             if self.strict:
                 raise FileNotFoundError(f"Artifact not found: {filepath}")
             return
+
+        if self.strict and os.path.getsize(filepath) > self.max_artifact_size:
+            raise ValueError(f"Artifact exceeds maximum size ({self.max_artifact_size} bytes): {filepath}")
 
         if arcname is None:
             arcname = os.path.basename(filepath)
@@ -263,6 +269,14 @@ class TraceSession:
                 sys.stdout.flush()
 
             dst_path = os.path.join(data_dir, name)
+
+            # Check file size
+            try:
+                if os.path.getsize(src_path) > self.max_artifact_size:
+                    print(f"Warning: Skipping artifact {name} (exceeds max size)")
+                    continue
+            except OSError:
+                 pass # Will fail copy later or handled elsewhere
 
             # Double check destination is within data_dir
             try:
