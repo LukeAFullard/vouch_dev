@@ -11,6 +11,18 @@ class Auditor:
         self._target = target
         self._name = name or getattr(target, "__name__", str(target))
 
+    def __setattr__(self, name, value):
+        if name in ("_target", "_name"):
+            super().__setattr__(name, value)
+        else:
+            setattr(self._target, name, value)
+
+    def __delattr__(self, name):
+        if name in ("_target", "_name"):
+            super().__delattr__(name)
+        else:
+            delattr(self._target, name)
+
     def __getattr__(self, name):
         # Pass through dunder methods or internal attributes to avoid issues
         if name.startswith("_"):

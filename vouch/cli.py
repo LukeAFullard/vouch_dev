@@ -9,6 +9,7 @@ import vouch
 from .crypto import CryptoManager
 from .hasher import Hasher
 from .reporter import Reporter
+from .differ import Differ
 
 def verify(args):
     filepath = args.file
@@ -235,6 +236,9 @@ def report(args):
         print(f"Error generating report: {e}")
         sys.exit(1)
 
+def diff(args):
+    Differ.diff_sessions(args.file1, args.file2, args.show_hashes)
+
 def main():
     parser = argparse.ArgumentParser(description="Vouch: Forensic Audit Wrapper")
     subparsers = parser.add_subparsers(dest="command")
@@ -255,6 +259,12 @@ def main():
     report_parser.add_argument("output", help="Path to output file")
     report_parser.add_argument("--format", choices=["html", "md"], default="html", help="Report format (default: html)")
 
+    # diff
+    diff_parser = subparsers.add_parser("diff", help="Compare two .vch files")
+    diff_parser.add_argument("file1", help="Path to first .vch file")
+    diff_parser.add_argument("file2", help="Path to second .vch file")
+    diff_parser.add_argument("--show-hashes", action="store_true", help="Display full hashes for mismatches")
+
     args = parser.parse_args()
 
     if args.command == "verify":
@@ -263,6 +273,8 @@ def main():
         gen_keys(args)
     elif args.command == "report":
         report(args)
+    elif args.command == "diff":
+        diff(args)
     else:
         parser.print_help()
 
