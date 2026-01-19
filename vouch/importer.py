@@ -29,16 +29,37 @@ class VouchFinder(MetaPathFinder):
         else:
             self.targets = set(targets)
 
+        # Determine strict exclusion list
+        self.excludes = {"vouch", "pytest", "unittest", "pip", "setuptools", "wheel", "_pytest", "pluggy", "iniconfig", "packaging"}
+        if hasattr(sys, "stdlib_module_names"):
+             self.excludes.update(sys.stdlib_module_names)
+
+    def _should_audit(self, fullname):
+        if fullname in self.excludes:
+            return False
+        if any(fullname.startswith(p + ".") for p in self.excludes):
+            return False
+
+        if "*" in self.targets:
+             return True
+
+        return fullname in self.targets
+
     def find_spec(self, fullname, path, target=None):
-        if fullname in self.targets:
+        if self._should_audit(fullname):
             # Remove self to find original spec
             sys.meta_path = [x for x in sys.meta_path if x is not self]
             try:
                 spec = importlib.util.find_spec(fullname)
+            except Exception:
+                # If find_spec fails, we can't wrap it
+                spec = None
             finally:
                 sys.meta_path.insert(0, self)
 
             if spec and spec.loader:
+                # Only wrap if it's not a builtin/extension that might break?
+                # For now, wrap everything that has a loader.
                 spec.loader = VouchLoader(spec.loader, fullname)
                 return spec
         return None
@@ -47,7 +68,8 @@ class VouchFinder(MetaPathFinder):
 def auto_audit(targets=None):
     """
     Context manager to automatically wrap specified modules with Auditor.
-    targets: list of module names to wrap (default: ['pandas', 'numpy'])
+    targets: list of module names to wrap (default: ['pandas', 'numpy']).
+             If targets=['*'], it attempts to wrap all non-standard-library imports.
     """
     if targets is None:
         targets = ["pandas", "numpy"]
@@ -58,7 +80,18 @@ def auto_audit(targets=None):
     # Handle already loaded modules
     original_modules = {}
 
+    if "*" in targets:
+        # Scan sys.modules and wrap anything that passes the filter
+        for name in list(sys.modules.keys()):
+            if finder._should_audit(name):
+                mod = sys.modules[name]
+                if not isinstance(mod, Auditor):
+                    original_modules[name] = mod
+                    sys.modules[name] = Auditor(mod, name=name)
+
+    # Wrap specifically listed targets if they are already loaded
     for name in targets:
+        if name == "*": continue
         if name in sys.modules:
             mod = sys.modules[name]
             # Avoid double wrapping
