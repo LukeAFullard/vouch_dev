@@ -18,6 +18,9 @@ import pandas as pd
 # Start the audit session
 # Automatically generates a file like 'audit_20231027_093000.vch'
 with vouch.vouch():
+    # TIP: Import libraries inside the block to ensure tracking
+    # (unless you use the 'Audit Everything' wildcard below)
+    import pandas as pd
 
     # Load your data
     # Vouch automatically records the hash of 'data.csv'
@@ -38,14 +41,16 @@ import vouch
 
 @vouch.record
 def main():
+    # TIP: Import libraries inside the decorated function
     import pandas as pd
+
     df = pd.read_csv("data.csv")
     df.to_csv("summary.csv")
 
 main()
 ```
 
-> **Important:** Only use `@vouch.record` on your main entry point or top-level workflow function. Do **not** apply it to every helper function, as nested audit sessions are not supported and will raise an error.
+> **Important:** Only use `@vouch.record` on your main entry point or top-level workflow function. Do **not** apply it to every helper function, as nested audit sessions are not supported.
 
 ### 2. Run It
 
@@ -83,15 +88,17 @@ This confirms that:
 *   **Artifact Integrity**: The captured files match the hashes in the log.
 *   **Environment**: The Python version and library versions are recorded accurately.
 
-## Audit Everything
+## Audit Everything (Retroactive)
 
-If you use libraries other than `pandas` and `numpy` (e.g., `polars`, `sklearn`, `scipy`), you can tell Vouch to audit **all** imports automatically.
+If you have already imported libraries or want to track libraries other than `pandas` (e.g., `polars`, `sklearn`), use the wildcard target:
 
 ```python
-# Audit all third-party libraries imported in this block
+import polars as pl
+
+# 'targets=["*"]' will audit all future imports AND try to wrap
+# already-imported libraries like 'polars' above.
 with vouch.start(targets=["*"]):
-    import polars as pl
-    import sklearn
+    df = pl.read_csv("data.csv")
     ...
 ```
 
