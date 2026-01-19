@@ -21,3 +21,7 @@ By default, Vouch excludes standard library modules (e.g., `json`, `math`, `os`)
 ## 4. Class Constructors (Proxied)
 
 Vouch now wraps class constructors (e.g., `pd.DataFrame()`) to return wrapped instances. However, because the class itself is wrapped in an `Auditor` proxy, using the class object in strict type checks (e.g. `isinstance(obj, pd.DataFrame)`) where `pd.DataFrame` is the wrapper might behave unexpectedly compared to using the original class.
+
+## 5. Threading and Multiprocessing
+
+Vouch's `TraceSession` is currently thread-local. Calls made in background threads (or subprocesses) will NOT be logged because they do not have access to the active audit session. Wrapped objects will still function correctly in threads (avoiding crashes), but their actions will be invisible to the audit log.

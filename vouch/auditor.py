@@ -86,7 +86,8 @@ class Auditor:
             return self._wrap_callable(attr, name)
 
         # Recursively wrap attributes that are part of the library (heuristic)
-        return Auditor(attr, name=f"{self._name}.{name}")
+        # Use _wrap_result logic to avoid wrapping primitives/builtins
+        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
 
     def _wrap_class(self, cls: type, cls_name: str) -> Any:
         """
@@ -194,9 +195,9 @@ class Auditor:
             extra_hashes = {**input_hashes, **output_hashes}
 
             # Log if a session is active
+            full_name = f"{self._name}.{func_name}"
             session = TraceSession.get_active_session()
             if session:
-                full_name = f"{self._name}.{func_name}"
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
@@ -241,6 +242,24 @@ class Auditor:
 
     def __iter__(self):
         return iter(self._target)
+
+    def __bool__(self):
+        return bool(self._target)
+
+    def __enter__(self):
+        return self._wrap_result(self._target.__enter__(), f"{self._name}.__enter__")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._target.__exit__(exc_type, exc_val, exc_tb)
+
+    def __await__(self):
+        return self._target.__await__()
+
+    def __aiter__(self):
+        return self._wrap_result(self._target.__aiter__(), f"{self._name}.__aiter__")
+
+    async def __anext__(self):
+        return self._wrap_result(await self._target.__anext__(), f"{self._name}.__anext__")
 
     def __str__(self):
         return str(self._target)
@@ -323,6 +342,9 @@ class Auditor:
     # Comparison
     def __eq__(self, other):
         return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
+
+    def __hash__(self):
+        return hash(self._target)
 
     def __ne__(self, other):
         return self._wrap_result(self._target != self._unwrap(other), f"{self._name} != {other}")
