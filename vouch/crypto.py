@@ -87,14 +87,25 @@ class CryptoManager:
                 )
         except TypeError as e:
             if "password was not given" in str(e).lower():
-                 raise ValueError("Private key is encrypted but no password was provided.") from e
+                 raise ValueError(
+                    f"Private key is encrypted but no password was provided\n"
+                    f"  Key file: {path}\n"
+                    f"  Fix: Pass private_key_password='...' to TraceSession"
+                ) from e
             raise RuntimeError(f"Failed to load private key: {e}") from e
         except ValueError as e:
             if "bad decrypt" in str(e).lower() or "password" in str(e).lower():
-                raise ValueError("Incorrect password for private key") from e
+                raise ValueError(
+                    f"Incorrect password for private key\n"
+                    f"  Key file: {path}\n"
+                    f"  Hint: Use 'vouch gen-keys --name <name> --password <pwd>' to create a new key"
+                ) from e
             raise
         except FileNotFoundError:
-            raise FileNotFoundError(f"Private key file not found: {path}")
+            raise FileNotFoundError(
+                f"Private key file not found: {path}\n"
+                f"  Fix: Generate keys with 'vouch gen-keys --name {os.path.basename(path)}'"
+            )
         except Exception as e:
             raise RuntimeError(f"Failed to load private key: {e}") from e
 

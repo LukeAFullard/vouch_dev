@@ -18,7 +18,8 @@ class TestProductionScenarios(unittest.TestCase):
 
     def test_concurrent_sessions_fails(self):
         # Ensure no active session from previous tests
-        TraceSession._active_session = None
+        if hasattr(TraceSession._active_session, 'session'):
+            TraceSession._active_session.session = None
 
         with TraceSession(os.path.join(self.test_dir, "s1.vch")):
             with self.assertRaisesRegex(RuntimeError, "Nested TraceSessions are not supported"):

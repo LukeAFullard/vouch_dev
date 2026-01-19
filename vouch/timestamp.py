@@ -55,8 +55,11 @@ class TimestampClient:
         # openssl ts -verify -in <tsr> -data <file> [-CAfile <ca>]
         cmd = [self.openssl_path, "ts", "-verify", "-in", tsr_path, "-data", data_path]
         if ca_file:
+             if not os.path.exists(ca_file):
+                 raise FileNotFoundError(f"CA file not found: {ca_file}")
              cmd.extend(["-CAfile", ca_file])
         else:
+             logger.warning("Timestamp verification without CA file - trust cannot be established")
              # Try to verify with system roots or just implicit
              # Note: openssl ts -verify often fails if it can't build chain.
              # We might want to pass -untrusted tsr_path as it sometimes contains the certs.

@@ -43,8 +43,8 @@ class TestUsability(unittest.TestCase):
 
         # Check multiline error message
         msg = str(cm.exception)
-        self.assertIn("Failed to sign artifacts", msg)
-        self.assertIn(f"Key path: {self.priv_key}", msg)
+        self.assertIn("Failed to sign audit artifacts", msg)
+        self.assertIn(f"Key: {self.priv_key}", msg)
         self.assertIn("Incorrect password", msg)
 
     def test_missing_key_message(self):
