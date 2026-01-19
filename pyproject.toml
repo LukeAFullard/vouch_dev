@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "vouch"
+version = "0.1.0"
+description = "A forensic audit wrapper for data analysis workflows"
+authors = ["Luke Fullard <luke.fullard@gmail.com>"]
+readme = "README.md"
+packages = [{include = "vouch"}]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+cryptography = "^46.0.0"
+pandas = "^2.0.0"
+numpy = "^2.0.0"
+
+[tool.poetry.scripts]
+vouch = "vouch.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

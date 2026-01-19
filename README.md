@@ -7,23 +7,28 @@ Vouch wraps existing Python libraries (like Pandas and NumPy) to create a legall
 ## Features
 
 *   **Non-Intrusive Proxy:** Wraps libraries without modifying their code.
-*   **Tamper-Evident Logging:** SHA-256 hashing of all function inputs, outputs, and accessed files.
-*   **Cryptographic Signing:** RSA-2048 signing of audit logs for non-repudiation.
-*   **Environment Capture:** Records exact dependency versions (`pip freeze`) for reproducibility.
-*   **Verification CLI:** Easy-to-use command line tool to validate audit packages and data provenance.
+*   **Tamper-Evident Logging:** SHA-256 hash chaining of all function inputs, outputs, and accessed files.
+*   **Cryptographic Signing:** RSA-2048 signing of audit logs and artifact manifests for non-repudiation.
+*   **Encrypted Identities:** Optional password-based encryption for private keys (PKCS#8).
+*   **Reproducibility:** Enforces random seeds and captures exact environment dependency versions (`pip freeze`).
+*   **Artifact Bundling:** Securely bundles input/output files with the audit package.
+*   **Reporting:** Generates human-readable HTML and Markdown reports from audit packages.
+*   **Verification CLI:** Strict validation of signatures, hash chains, and environment compatibility.
 
 ## Installation
 
 ```bash
-pip install -e .
+pip install .
 ```
 
 ## Quick Start
 
 ### 1. Generate Keys
 
+Generate a secure RSA key pair. You can optionally protect the private key with a password.
+
 ```bash
-vouch gen-keys --name my_identity
+vouch gen-keys --name my_identity --password "super-secret"
 ```
 
 ### 2. Wrap and Run
@@ -35,8 +40,11 @@ import pandas as pd
 # Wrap libraries
 pandas = Auditor(pd)
 
-# Run session
-with TraceSession("output.vch", private_key_path="my_identity"):
+# Run session with encrypted key and enforced seed
+with TraceSession("output.vch",
+                  private_key_path="my_identity",
+                  private_key_password="super-secret",
+                  seed=42):
     # Vouch will hash 'data.csv' when read
     df = pandas.read_csv("data.csv")
     # Vouch logs this operation
@@ -45,11 +53,31 @@ with TraceSession("output.vch", private_key_path="my_identity"):
 
 ### 3. Verify
 
+Verify the integrity of the package, including signatures, log chains, and environment versions.
+
 ```bash
 vouch verify output.vch --data data.csv
 ```
 
+### 4. Generate Report
+
+Create a human-readable summary of the audit session.
+
+```bash
+vouch report output.vch report.html --format html
+```
+
 ## Examples
+
+### Generating Audit Reports
+
+Vouch can transform dense audit logs into clear, readable reports in HTML or Markdown format.
+
+See the [**Reporting Walkthrough**](examples/REPORTING_WALKTHROUGH.md) for details and output previews.
+
+```bash
+python3 examples/generate_report_example.py
+```
 
 ### Inspecting Audit Logs and Environment
 
