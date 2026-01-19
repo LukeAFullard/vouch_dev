@@ -58,12 +58,17 @@ def verify(args):
             client = TimestampClient()
             try:
                 # Basic verification of data match
-                if client.verify_timestamp(os.path.join(temp_dir, "audit_log.json"), tsr_path):
+                ca_file = args.tsa_ca_file if hasattr(args, 'tsa_ca_file') else None
+                if client.verify_timestamp(os.path.join(temp_dir, "audit_log.json"), tsr_path, ca_file):
                     print("    [OK] Timestamp Verified (Matches Log)")
                 else:
                     print("    [FAIL] Timestamp Verification Failed")
+                    if args.strict:
+                        sys.exit(1)
             except Exception as e:
                 print(f"    [FAIL] Timestamp Error: {e}")
+                if args.strict:
+                    sys.exit(1)
 
         # Verify Log Chain
         try:
@@ -97,7 +102,8 @@ def verify(args):
                  print("  [FAIL] Log Chain Integrity: Broken")
                  sys.exit(1)
         except Exception as e:
-            print(f"  [WARN] Could not verify log chain: {e}")
+            print(f"  [FAIL] Log Chain Verification Error: {e}")
+            sys.exit(1)
 
         # Verify Environment
         env_lock_path = os.path.join(temp_dir, "environment.lock")
@@ -326,6 +332,7 @@ def main():
     verify_parser.add_argument("--auto-data", action="store_true", help="Automatically verify all files referenced in the log")
     verify_parser.add_argument("--auto-data-dir", help="Directory to search for referenced files (default: current directory)")
     verify_parser.add_argument("--tsa-ca-file", help="Path to TSA CA certificate for timestamp verification")
+    verify_parser.add_argument("--strict", action="store_true", help="Fail verification if timestamp validation fails")
 
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")

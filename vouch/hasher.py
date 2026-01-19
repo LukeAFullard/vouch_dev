@@ -37,7 +37,7 @@ class Hasher:
              try:
                  # Deterministic CSV serialization
                  # float_format='%.17g' ensures full precision for floats
-                 csv_str = obj.to_csv(index=True, float_format='%.17g')
+                 csv_str = obj.to_csv(index=True, float_format='%.17g', line_terminator='\n')
                  hasher.update(csv_str.encode('utf-8'))
              except Exception:
                  # Fallback to string representation

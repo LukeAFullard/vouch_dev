@@ -2,6 +2,8 @@ import os
 import sys
 import subprocess
 import json
+import uuid
+import datetime
 import zipfile
 import tempfile
 import shutil
@@ -9,6 +11,7 @@ import random
 import inspect
 import builtins
 import logging
+import threading
 from typing import Optional, Dict, Any, List
 
 import vouch
@@ -23,7 +26,7 @@ class TraceSession:
     """
     A context manager that records library calls, hashes artifacts, and generates a verifiable audit package.
     """
-    _active_session: Optional['TraceSession'] = None
+    _active_session = threading.local()
 
     def __init__(
         self,
@@ -62,18 +65,30 @@ class TraceSession:
         self.capture_script = capture_script
         self.auto_track_io = auto_track_io
         self.max_artifact_size = max_artifact_size
+        self.session_id = str(uuid.uuid4())
         self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
         self._original_open: Optional[Any] = None
         self._in_tracked_open = False
 
     def __enter__(self) -> 'TraceSession':
-        if TraceSession._active_session is not None:
+        if getattr(TraceSession._active_session, 'session', None) is not None:
             raise RuntimeError("Nested TraceSessions are not supported.")
-        TraceSession._active_session = self
+        TraceSession._active_session.session = self
 
         try:
             # Setup temporary directory for artifacts
             self.temp_dir = tempfile.mkdtemp()
+
+            self.logger.log_call(
+                "session.initialize",
+                [],
+                {},
+                None,
+                extra_hashes={
+                    "session_id": self.session_id,
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                }
+            )
 
             # Create data directory for captured files
             os.makedirs(os.path.join(self.temp_dir, "data"))
@@ -97,7 +112,7 @@ class TraceSession:
                 self._hook_open()
 
         except Exception:
-            TraceSession._active_session = None
+            TraceSession._active_session.session = None
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
             raise
@@ -109,7 +124,7 @@ class TraceSession:
             builtins.open = self._original_open
             self._original_open = None
 
-        TraceSession._active_session = None
+        TraceSession._active_session.session = None
 
         try:
             # 1. Save audit_log.json
@@ -221,7 +236,7 @@ class TraceSession:
 
     @classmethod
     def get_active_session(cls) -> Optional['TraceSession']:
-        return cls._active_session
+        return getattr(cls._active_session, 'session', None)
 
     def _check_rng_usage(self):
         if 'torch' in sys.modules:
@@ -400,9 +415,10 @@ class TraceSession:
 
         except Exception as e:
             msg = (
-                f"Failed to sign artifacts.\n"
-                f"  Key path: {self.private_key_path}\n"
-                f"  Error: {e}"
+                f"Failed to sign audit artifacts\n"
+                f"  Key: {self.private_key_path}\n"
+                f"  Error: {e}\n"
+                f"  Hint: Verify key exists and password is correct"
             )
             if self.strict:
                 raise RuntimeError(msg) from e

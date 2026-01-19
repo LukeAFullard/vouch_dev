@@ -42,22 +42,23 @@ class TestInspector(unittest.TestCase):
     def test_summary(self):
         output = self.run_cmd("summary")
         self.assertIn("Audit Package Summary", output)
-        self.assertIn("Total Log Entries: 1", output)
+        self.assertIn("Total Log Entries: 2", output)
         self.assertIn("Total Artifacts: 1", output)
 
     def test_timeline(self):
         output = self.run_cmd("timeline")
         self.assertIn("Timeline", output)
         self.assertIn("func1", output)
+        self.assertIn("session.initialize", output)
 
     def test_timeline_limit(self):
-        output = self.run_cmd("timeline 1")
+        output = self.run_cmd("timeline 2")
         self.assertIn("Timeline", output)
         self.assertIn("func1", output)
 
     def test_show_entry(self):
-        output = self.run_cmd("show 0")
-        self.assertIn("Log Entry #0", output)
+        output = self.run_cmd("show 1")
+        self.assertIn("Log Entry #1", output)
         self.assertIn('"target": "func1"', output)
 
     def test_show_invalid_index(self):
