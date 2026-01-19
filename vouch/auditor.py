@@ -1,7 +1,10 @@
 import functools
 import os
+import logging
 from .session import TraceSession
 from .hasher import Hasher
+
+logger = logging.getLogger(__name__)
 
 class Auditor:
     """
@@ -60,8 +63,10 @@ class Auditor:
                             file_hash = Hasher.hash_file(args[0])
                             extra_hashes["arg_0_file_hash"] = file_hash
                             extra_hashes["arg_0_path"] = args[0]
-                        except Exception:
-                            pass
+                        except (IOError, OSError) as e:
+                            logger.warning(f"Failed to hash file {args[0]}: {e}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
                     # Check common kwargs for file paths
                     # specific to pandas.read_csv(filepath_or_buffer=...) or generic
@@ -71,8 +76,10 @@ class Auditor:
                                 file_hash = Hasher.hash_file(val)
                                 extra_hashes[f"kwarg_{key}_file_hash"] = file_hash
                                 extra_hashes[f"kwarg_{key}_path"] = val
-                             except Exception:
-                                pass
+                             except (IOError, OSError) as e:
+                                logger.warning(f"Failed to hash file {val}: {e}")
+                             except Exception as e:
+                                logger.error(f"Unexpected error hashing {val}: {e}")
 
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 

@@ -23,8 +23,11 @@ class VouchLoader(Loader):
         sys.modules[self.name] = wrapped
 
 class VouchFinder(MetaPathFinder):
-    def __init__(self):
-        self.targets = {"pandas", "numpy"}
+    def __init__(self, targets=None):
+        if targets is None:
+            self.targets = {"pandas", "numpy"}
+        else:
+            self.targets = set(targets)
 
     def find_spec(self, fullname, path, target=None):
         if fullname in self.targets:
@@ -41,16 +44,19 @@ class VouchFinder(MetaPathFinder):
         return None
 
 @contextmanager
-def auto_audit():
+def auto_audit(targets=None):
     """
-    Context manager to automatically wrap pandas and numpy imports with Auditor.
+    Context manager to automatically wrap specified modules with Auditor.
+    targets: list of module names to wrap (default: ['pandas', 'numpy'])
     """
-    finder = VouchFinder()
+    if targets is None:
+        targets = ["pandas", "numpy"]
+
+    finder = VouchFinder(targets)
     sys.meta_path.insert(0, finder)
 
     # Handle already loaded modules
     original_modules = {}
-    targets = ["pandas", "numpy"]
 
     for name in targets:
         if name in sys.modules:

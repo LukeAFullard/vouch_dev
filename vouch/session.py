@@ -6,8 +6,13 @@ import zipfile
 import tempfile
 import shutil
 import random
+import inspect
+import builtins
+import logging
 import vouch
 from .logger import Logger
+
+logger = logging.getLogger(__name__)
 from .crypto import CryptoManager
 from .hasher import Hasher
 from cryptography.hazmat.primitives import serialization
@@ -15,7 +20,7 @@ from cryptography.hazmat.primitives import serialization
 class TraceSession:
     _active_session = None
 
-    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None):
+    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None, capture_script=True, auto_track_io=False):
         self.filename = filename
         self.strict = strict
         self.seed = seed
@@ -23,7 +28,10 @@ class TraceSession:
         self.temp_dir = None
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
+        self.capture_script = capture_script
+        self.auto_track_io = auto_track_io
         self.artifacts = {} # Map arcname -> local_path
+        self._original_open = None
 
     def __enter__(self):
         if TraceSession._active_session is not None:
@@ -46,9 +54,21 @@ class TraceSession:
                 pass
             self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
 
+        self._check_rng_usage()
+
+        if self.capture_script:
+            self._capture_calling_script()
+
+        if self.auto_track_io:
+            self._hook_open()
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._original_open:
+            builtins.open = self._original_open
+            self._original_open = None
+
         TraceSession._active_session = None
 
         try:
@@ -115,9 +135,58 @@ class TraceSession:
         # We use log_call to insert it into the chain
         self.logger.log_call("track_file", [filepath], {}, None, extra_hashes={"file_hash": file_hash})
 
+    def annotate(self, key, value):
+        """
+        Add a metadata annotation to the audit log.
+        """
+        self.logger.log_call("annotate", [key, value], {}, None)
+
     @classmethod
     def get_active_session(cls):
         return cls._active_session
+
+    def _check_rng_usage(self):
+        if 'torch' in sys.modules:
+             logger.warning("PyTorch detected. Please ensure you manually seed it with torch.manual_seed(seed).")
+        if 'tensorflow' in sys.modules:
+             logger.warning("TensorFlow detected. Please ensure you manually seed it with tf.random.set_seed(seed).")
+
+    def _capture_calling_script(self):
+        try:
+            # Stack: 0=this, 1=__enter__, 2=caller
+            frame = inspect.stack()[2]
+            module = inspect.getmodule(frame[0])
+            if module and hasattr(module, '__file__') and module.__file__:
+                script_path = os.path.abspath(module.__file__)
+                if os.path.exists(script_path):
+                     # Add as artifact
+                     # Use a special name
+                     self.add_artifact(script_path, arcname=f"__script__{os.path.basename(script_path)}")
+        except Exception as e:
+            logger.warning(f"Failed to capture calling script: {e}")
+
+    def _hook_open(self):
+        self._original_open = builtins.open
+
+        def tracked_open(file, mode='r', *args, **kwargs):
+            result = self._original_open(file, mode, *args, **kwargs)
+
+            # Recursion guard
+            if not getattr(self, '_in_tracked_open', False):
+                try:
+                    self._in_tracked_open = True
+                    # Check if file is string and opened for reading
+                    if isinstance(file, str) and ('r' in mode or 'rb' in mode):
+                         if os.path.exists(file):
+                             self.track_file(file)
+                except Exception:
+                    pass
+                finally:
+                    self._in_tracked_open = False
+
+            return result
+
+        builtins.open = tracked_open
 
     def _capture_environment(self, filepath):
         try:
