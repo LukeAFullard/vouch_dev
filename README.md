@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/vouch.png" width="95%"></p>
+
 # Vouch
 
 **Forensic logging and verification tool for data analysis workflows.**
