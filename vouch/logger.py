@@ -9,13 +9,16 @@ class Logger:
         self.sequence_number = 0
         self.previous_entry_hash = "0" * 64
 
-    def log_call(self, target_name, args, kwargs, result, extra_hashes=None):
+    def log_call(self, target_name, args, kwargs, result, extra_hashes=None, error=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         # Hash arguments and result
         args_hash = Hasher.hash_object(args)
         kwargs_hash = Hasher.hash_object(kwargs)
-        result_hash = Hasher.hash_object(result)
+        if error:
+            result_hash = "ERROR"
+        else:
+            result_hash = Hasher.hash_object(result)
 
         # Create a readable representation for simple types
         # For complex types, we might just store type info
@@ -40,11 +43,15 @@ class Logger:
             "target": target_name,
             "args_repr": [safe_repr(a) for a in args],
             "kwargs_repr": {k: safe_repr(v) for k, v in kwargs.items()},
-            "result_repr": safe_repr(result),
+            "result_repr": safe_repr(result) if not error else "ERROR",
             "args_hash": args_hash,
             "kwargs_hash": kwargs_hash,
             "result_hash": result_hash
         }
+
+        if error:
+            entry["error"] = str(error)
+            entry["error_type"] = type(error).__name__
 
         if extra_hashes:
             entry["extra_hashes"] = extra_hashes
