@@ -36,6 +36,7 @@ class Auditor:
 
     def __getattr__(self, name: str) -> Any:
         # Pass through dunder methods or internal attributes to avoid issues
+        # (Though __getattr__ is only called if not found)
         if name.startswith("_"):
             return getattr(self._target, name)
 
@@ -49,6 +50,9 @@ class Auditor:
         if callable(attr):
             return self._wrap_callable(attr, name)
 
+        # Recursively wrap attributes that are part of the library (heuristic)
+        # Check if module starts with same prefix?
+        # For now, simplistic wrapping.
         return Auditor(attr, name=f"{self._name}.{name}")
 
     def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
@@ -64,7 +68,7 @@ class Auditor:
 
                 # Check for file I/O (naive implementation for read_*)
                 extra_hashes = {}
-                if "read" in func_name or "load" in func_name:
+                if "read" in func_name or "load" in func_name or "to_" in func_name:
                     # Check first positional arg
                     if args and isinstance(args[0], str) and os.path.exists(args[0]):
                         try:
@@ -91,8 +95,81 @@ class Auditor:
 
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
+            # --- Deep Wrapping Logic ---
+            # If the result is an object from the same package as the wrapped target,
+            # we should wrap it too so subsequent calls (e.g. df.to_csv) are audited.
+
+            # Determine target package
+            target_pkg = getattr(self._target, "__module__", "").split(".")[0]
+            if not target_pkg and hasattr(self._target, "__package__"):
+                 target_pkg = self._target.__package__
+
+            # If we can't determine package, maybe infer from self._name?
+            # e.g. "pandas.read_csv" -> "pandas"
+            if not target_pkg and "." in self._name:
+                target_pkg = self._name.split(".")[0]
+
+            if target_pkg and result is not None:
+                # Check if result belongs to same package
+                res_mod = getattr(type(result), "__module__", "")
+                if res_mod and res_mod.startswith(target_pkg):
+                    # Wrap it!
+                    # We assume it's a class instance (like DataFrame), so we wrap it.
+                    # We assume primitives (int, str) are NOT in the package module (they are builtins).
+                    return Auditor(result, name=f"{full_name}()")
+
             return result
         return wrapper
+
+    # --- Proxy Dunder Methods ---
+    # To allow wrapped objects (like DataFrames) to be used naturally (df['col'], len(df), etc.)
+    # we must proxy dunder methods.
+    # Since __getattr__ is not called for dunders, we must define them explicitly.
+
+    def __getitem__(self, key):
+        return self._target[key]
+
+    def __setitem__(self, key, value):
+        self._target[key] = value
+
+    def __len__(self):
+        return len(self._target)
+
+    def __iter__(self):
+        return iter(self._target)
+
+    def __str__(self):
+        return str(self._target)
+
+    # Arithmetic operators (forward to target)
+    # Note: If target doesn't support it, this raises TypeError, which is correct.
+    # We unwrap self for the operation to work if the other operand is raw?
+    # Or rely on python's dispatch.
+
+    def __add__(self, other):
+        return self._target + other
+
+    def __sub__(self, other):
+        return self._target - other
+
+    def __mul__(self, other):
+        return self._target * other
+
+    def __truediv__(self, other):
+        return self._target / other
+
+    def __floordiv__(self, other):
+        return self._target // other
+
+    # Reverse arithmetic (if other + self)
+    def __radd__(self, other):
+        return other + self._target
+
+    def __rsub__(self, other):
+        return other - self._target
+
+    def __rmul__(self, other):
+        return other * self._target
 
     def __repr__(self):
         return f"<Auditor({self._name}) wrapping {self._target}>"
