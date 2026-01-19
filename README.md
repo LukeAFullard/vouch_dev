@@ -29,43 +29,33 @@ pip install .
 
 ## Quick Start
 
-### 1. Generate Keys
+See [QUICKSTART.md](QUICKSTART.md) for a detailed guide.
 
-Generate a secure RSA key pair. You can optionally protect the private key with a password.
+### 1. Write and Run
 
-```bash
-vouch gen-keys --name my_identity --password "super-secret"
-```
-
-### 2. Wrap and Run
-
-You can manually wrap objects or use `auto_audit` to automatically capture imports.
+Vouch requires **Zero Configuration** to get started. Just wrap your code with `vouch.start()`.
 
 ```python
-from vouch import TraceSession, auto_audit
+import vouch
+import pandas as pd
 
-# Run session with encrypted key, timestamping, and enforced seed
-with TraceSession("output.vch",
-                  private_key_path="my_identity",
-                  private_key_password="super-secret",
-                  tsa_url="https://freetsa.org/tsr", # Optional RFC 3161 Timestamping
-                  seed=42):
-    with auto_audit():
-        import pandas as pd
-
-        # Vouch will hash 'data.csv' when read
-        df = pd.read_csv("data.csv")
-        # Vouch logs this operation
-        print(df.describe())
+# Start an audit session (automatically generates temporary secure keys)
+with vouch.start("audit.vch"):
+    df = pd.read_csv("data.csv")
+    print(df.describe())
 ```
 
-### 3. Verify
+### 2. Verify
 
-Verify the integrity of the package, including signatures, log chains, and environment versions.
+Verify the integrity of the package immediately.
 
 ```bash
-vouch verify output.vch --data data.csv
+vouch verify audit.vch
 ```
+
+## Advanced Usage
+
+For production use, you should establish a persistent identity using `vouch gen-keys`.
 
 ### 4. Generate Report
 

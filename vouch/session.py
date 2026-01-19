@@ -59,6 +59,7 @@ class TraceSession:
         self.seed = seed
         self.logger = Logger()
         self.temp_dir: Optional[str] = None
+        self._ephemeral_key = None
 
         # Auto-detect private key if not provided
         if private_key_path is None:
@@ -71,6 +72,10 @@ class TraceSession:
                 private_key_path = local_key
             elif os.path.exists(global_key):
                 private_key_path = global_key
+            else:
+                # No key found, generate ephemeral
+                self._ephemeral_key = CryptoManager.generate_ephemeral_private_key()
+                logger.info("No identity found. Using ephemeral session key.")
 
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
@@ -167,7 +172,7 @@ class TraceSession:
                         print(f"Warning: {msg}")
 
             # 4. Sign artifacts if private key is available
-            if self.private_key_path and os.path.exists(self.private_key_path):
+            if self._ephemeral_key or (self.private_key_path and os.path.exists(self.private_key_path)):
                 self._sign_artifacts(log_path)
             elif self.strict and self.private_key_path:
                  raise FileNotFoundError(f"Private key not found at {self.private_key_path}")
@@ -400,10 +405,13 @@ class TraceSession:
 
     def _sign_artifacts(self, log_path):
         try:
-            private_key = CryptoManager.load_private_key(
-                self.private_key_path,
-                password=self.private_key_password
-            )
+            if self._ephemeral_key:
+                private_key = self._ephemeral_key
+            else:
+                private_key = CryptoManager.load_private_key(
+                    self.private_key_path,
+                    password=self.private_key_password
+                )
 
             # Sign audit_log.json
             signature = CryptoManager.sign_file(private_key, log_path)

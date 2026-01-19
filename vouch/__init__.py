@@ -20,4 +20,22 @@ def audit(filename, targets=None, **kwargs):
         with auto_audit(targets=targets):
             yield sess
 
-__all__ = ["Auditor", "TraceSession", "auto_audit", "audit"]
+@contextmanager
+def start(filename, targets=None, **kwargs):
+    """
+    Start a Vouch audit session. This is the simplest entry point.
+
+    It automatically:
+    1. Generates a temporary identity if you don't have one.
+    2. Wraps common data libraries (pandas, numpy).
+    3. Records your workflow to the specified file.
+
+    Args:
+        filename: Output .vouch file path.
+        targets: List of module names to auto-wrap (default: pandas, numpy).
+        **kwargs: Arguments passed to TraceSession.
+    """
+    with audit(filename, targets, **kwargs) as sess:
+        yield sess
+
+__all__ = ["Auditor", "TraceSession", "auto_audit", "audit", "start"]
