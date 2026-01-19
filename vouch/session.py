@@ -12,6 +12,7 @@ import inspect
 import builtins
 import logging
 import threading
+import contextvars
 from typing import Optional, Dict, Any, List
 
 import vouch
@@ -26,7 +27,7 @@ class TraceSession:
     """
     A context manager that records library calls, hashes artifacts, and generates a verifiable audit package.
     """
-    _active_session = threading.local()
+    _active_session = contextvars.ContextVar("active_session", default=None)
 
     def __init__(
         self,
@@ -106,9 +107,9 @@ class TraceSession:
         return False
 
     def __enter__(self) -> 'TraceSession':
-        if getattr(TraceSession._active_session, 'session', None) is not None:
+        if TraceSession._active_session.get() is not None:
             raise RuntimeError("Nested TraceSessions are not supported.")
-        TraceSession._active_session.session = self
+        self._token = TraceSession._active_session.set(self)
 
         try:
             # Setup temporary directory for artifacts
@@ -159,7 +160,7 @@ class TraceSession:
             builtins.open = self._original_open
             self._original_open = None
 
-        TraceSession._active_session.session = None
+        TraceSession._active_session.reset(self._token)
 
         try:
             # 1. Save audit_log.json
@@ -271,7 +272,7 @@ class TraceSession:
 
     @classmethod
     def get_active_session(cls) -> Optional['TraceSession']:
-        return getattr(cls._active_session, 'session', None)
+        return cls._active_session.get()
 
     def _check_rng_usage(self):
         if 'torch' in sys.modules:

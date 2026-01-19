@@ -41,12 +41,12 @@ def test_generator_wrapping():
         assert isinstance(items[0], Auditor), "Generator item should be wrapped"
         assert items[0]._target[0] == 1
 
-def test_constructor_interception():
-    # Verify pd.DataFrame() returns a wrapped object
-    # Default targets include pandas
+def test_constructor_limitation():
+    # Verify pd.DataFrame() returns UNWRAPPED object (Limitation 4) to support Pickling
     with vouch.start(filename="test_constructor.vch"):
         df = pd.DataFrame({'a': [1]})
-        assert isinstance(df, Auditor), "DataFrame constructor result should be wrapped"
+        assert not isinstance(df, Auditor), "DataFrame constructor result should NOT be wrapped (Limitation)"
+        assert isinstance(df, pd.DataFrame), "Result should be real DataFrame"
 
 def test_stdlib_optin():
     import json

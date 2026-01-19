@@ -35,6 +35,12 @@ class Auditor:
         else:
             delattr(self._target, name)
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def _unwrap(self, obj: Any) -> Any:
         if isinstance(obj, Auditor):
             return obj._target
@@ -76,10 +82,12 @@ class Auditor:
 
         attr = getattr(self._target, name)
 
-        # If it's a class/type, allow wrapping it to intercept constructor calls
-        # But we must ensure it behaves like a type (callable)
+        # If it's a class/type, do NOT wrap it.
+        # Wrapping classes breaks pickling (identity check fails) and strict isinstance checks.
+        # This means constructor calls (e.g. pd.DataFrame()) are not intercepted,
+        # but the resulting objects are compatible with pickle and type checks.
         if isinstance(attr, type):
-            return self._wrap_class(attr, name)
+            return attr
 
         # If it's a callable (and not a class), wrap it
         if callable(attr):
@@ -88,13 +96,6 @@ class Auditor:
         # Recursively wrap attributes that are part of the library (heuristic)
         # Use _wrap_result logic to avoid wrapping primitives/builtins
         return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
-
-    def _wrap_class(self, cls: type, cls_name: str) -> Any:
-        """
-        Wrap a class to intercept constructor calls.
-        Returns a callable proxy that mimics the class but returns wrapped instances.
-        """
-        return Auditor(cls, name=cls_name)
 
     def __call__(self, *args, **kwargs):
         """

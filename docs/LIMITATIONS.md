@@ -18,10 +18,12 @@ Vouch does not wrap standard Python types like `list`, `dict`, `int`, or `str`. 
 
 By default, Vouch excludes standard library modules (e.g., `json`, `math`, `os`) to prevent stability issues. However, you can opt-in to audit specific standard library modules by listing them explicitly in the `targets` list (e.g., `targets=["json"]`).
 
-## 4. Class Constructors (Proxied)
+## 4. Class Constructors (Not Intercepted)
 
-Vouch now wraps class constructors (e.g., `pd.DataFrame()`) to return wrapped instances. However, because the class itself is wrapped in an `Auditor` proxy, using the class object in strict type checks (e.g. `isinstance(obj, pd.DataFrame)`) where `pd.DataFrame` is the wrapper might behave unexpectedly compared to using the original class.
+To support Pickling and Strict Type Checking of classes, Vouch does **not** wrap class objects (types). This means calls to class constructors (e.g., `pd.DataFrame()`) are **not** intercepted in the audit log. However, the resulting instance *is* compatible with pickling and subsequent method calls on it will be audited if it is wrapped elsewhere (e.g. via return value wrapping).
 
-## 5. Threading and Multiprocessing
+*Note: Factory functions like `pd.read_csv` or `np.array` ARE intercepted because they are functions, not classes.*
 
-Vouch's `TraceSession` is currently thread-local. Calls made in background threads (or subprocesses) will NOT be logged because they do not have access to the active audit session. Wrapped objects will still function correctly in threads (avoiding crashes), but their actions will be invisible to the audit log.
+## 5. Threading
+
+Vouch uses `contextvars` to manage the active audit session. This provides automatic support for `asyncio` concurrency. However, when using `threading.Thread` manually, the audit session context is NOT automatically propagated to new threads. Operations performed in background threads will not be logged unless you manually propagate the context.
