@@ -5,6 +5,7 @@ import json
 import zipfile
 import tempfile
 import shutil
+import random
 from .logger import Logger
 from .crypto import CryptoManager
 from .hasher import Hasher
@@ -32,6 +33,16 @@ class TraceSession:
 
         # Create data directory for captured files
         os.makedirs(os.path.join(self.temp_dir, "data"))
+
+        # Enforce seed
+        if self.seed is not None:
+            random.seed(self.seed)
+            try:
+                import numpy as np
+                np.random.seed(self.seed)
+            except ImportError:
+                pass
+            self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
 
         return self
 
@@ -89,6 +100,19 @@ class TraceSession:
 
         self.artifacts[arcname] = filepath
 
+    def track_file(self, filepath):
+        """
+        Manually log a file's hash in the audit trail without bundling it.
+        """
+        if not os.path.exists(filepath):
+            if self.strict:
+                raise FileNotFoundError(f"File not found: {filepath}")
+            return
+
+        file_hash = Hasher.hash_file(filepath)
+        # We use log_call to insert it into the chain
+        self.logger.log_call("track_file", [filepath], {}, None, extra_hashes={"file_hash": file_hash})
+
     @classmethod
     def get_active_session(cls):
         return cls._active_session
@@ -143,6 +167,13 @@ class TraceSession:
             signature = CryptoManager.sign_file(private_key, log_path)
             with open(os.path.join(self.temp_dir, "signature.sig"), "wb") as f:
                 f.write(signature)
+
+            # Sign artifacts.json if it exists
+            artifacts_path = os.path.join(self.temp_dir, "artifacts.json")
+            if os.path.exists(artifacts_path):
+                signature = CryptoManager.sign_file(private_key, artifacts_path)
+                with open(os.path.join(self.temp_dir, "artifacts.json.sig"), "wb") as f:
+                    f.write(signature)
 
             # Export public key
             public_key = private_key.public_key()
