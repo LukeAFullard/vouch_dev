@@ -7,6 +7,7 @@ import shutil
 import json
 from .crypto import CryptoManager
 from .hasher import Hasher
+from .reporter import Reporter
 
 def verify(args):
     filepath = args.file
@@ -46,10 +47,77 @@ def verify(args):
             print(f"  [FAIL] Signature Verification: Invalid ({e})")
             sys.exit(1)
 
+        # Verify Log Chain
+        try:
+            with open(os.path.join(temp_dir, "audit_log.json"), "r") as f:
+                log_data = json.load(f)
+
+            print("  [...] Verifying log chain integrity...")
+            prev_hash = "0" * 64
+            expected_seq = 1
+            chain_valid = True
+
+            for i, entry in enumerate(log_data):
+                # Check sequence number if present (backward compatibility)
+                if "sequence_number" in entry:
+                    if entry["sequence_number"] != expected_seq:
+                        print(f"    [FAIL] Entry {i}: Sequence mismatch (expected {expected_seq}, got {entry['sequence_number']})")
+                        chain_valid = False
+                    expected_seq += 1
+
+                # Check previous hash if present
+                if "previous_entry_hash" in entry:
+                    if entry["previous_entry_hash"] != prev_hash:
+                        print(f"    [FAIL] Entry {i}: Previous hash mismatch")
+                        chain_valid = False
+
+                prev_hash = Hasher.hash_object(entry)
+
+            if chain_valid:
+                 print("  [OK] Log Chain Integrity: Valid")
+            else:
+                 print("  [FAIL] Log Chain Integrity: Broken")
+                 sys.exit(1)
+        except Exception as e:
+            print(f"  [WARN] Could not verify log chain: {e}")
+
+        # Verify Environment
+        env_lock_path = os.path.join(temp_dir, "environment.lock")
+        if os.path.exists(env_lock_path):
+            try:
+                with open(env_lock_path, "r") as f:
+                    env_info = json.load(f)
+
+                recorded_version = env_info.get("python_version", "").split()[0]
+                current_version = sys.version.split()[0]
+
+                if recorded_version != current_version:
+                    print(f"  [WARN] Environment Mismatch: Recorded Python {recorded_version}, Current {current_version}")
+                else:
+                     print(f"  [OK] Environment: Python version matches ({current_version})")
+            except Exception as e:
+                print(f"  [WARN] Could not verify environment: {e}")
+
         # Verify Captured Artifacts if present
         artifacts_json_path = os.path.join(temp_dir, "artifacts.json")
         if os.path.exists(artifacts_json_path):
             print("  [...] Verifying captured artifacts...")
+
+            # Verify Artifact Manifest Signature
+            artifacts_sig_path = os.path.join(temp_dir, "artifacts.json.sig")
+            if os.path.exists(artifacts_sig_path):
+                 try:
+                     with open(artifacts_sig_path, "rb") as f:
+                         art_sig = f.read()
+                     CryptoManager.verify_file(pub_key, artifacts_json_path, art_sig)
+                     print("    [OK] Artifact Manifest Signature: Valid")
+                 except Exception as e:
+                     print(f"    [FAIL] Artifact Manifest Signature: Invalid ({e})")
+                     sys.exit(1)
+            else:
+                 print("    [FAIL] Artifact Manifest Signature: Missing (Manifest not signed)")
+                 sys.exit(1)
+
             try:
                 with open(artifacts_json_path, "r") as f:
                     manifest = json.load(f)
@@ -133,8 +201,17 @@ def gen_keys(args):
         private = args.name
         public = args.name + ".pub"
 
-    CryptoManager.generate_keys(private, public)
+    CryptoManager.generate_keys(private, public, password=args.password)
     print(f"Generated {private} and {public}")
+
+def report(args):
+    print(f"Generating report for {args.file}...")
+    try:
+        Reporter.generate_report(args.file, args.output, format=args.format)
+        print(f"Report saved to {args.output}")
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description="Vouch: Forensic Audit Wrapper")
@@ -148,6 +225,13 @@ def main():
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
     gen_keys_parser.add_argument("--name", help="Base name for keys (default: id_rsa)")
+    gen_keys_parser.add_argument("--password", help="Password for private key encryption")
+
+    # report
+    report_parser = subparsers.add_parser("report", help="Generate an HTML or Markdown report")
+    report_parser.add_argument("file", help="Path to .vch file")
+    report_parser.add_argument("output", help="Path to output file")
+    report_parser.add_argument("--format", choices=["html", "md"], default="html", help="Report format (default: html)")
 
     args = parser.parse_args()
 
@@ -155,6 +239,8 @@ def main():
         verify(args)
     elif args.command == "gen-keys":
         gen_keys(args)
+    elif args.command == "report":
+        report(args)
     else:
         parser.print_help()
 

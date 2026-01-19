@@ -6,6 +6,8 @@ from .hasher import Hasher
 class Logger:
     def __init__(self):
         self.log = []
+        self.sequence_number = 0
+        self.previous_entry_hash = "0" * 64
 
     def log_call(self, target_name, args, kwargs, result, extra_hashes=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -28,8 +30,12 @@ class Logger:
             except:
                 return f"<{type(obj).__name__}>"
 
+        self.sequence_number += 1
+
         entry = {
             "timestamp": timestamp,
+            "sequence_number": self.sequence_number,
+            "previous_entry_hash": self.previous_entry_hash,
             "action": "call",
             "target": target_name,
             "args_repr": [safe_repr(a) for a in args],
@@ -44,6 +50,7 @@ class Logger:
             entry["extra_hashes"] = extra_hashes
 
         self.log.append(entry)
+        self.previous_entry_hash = Hasher.hash_object(entry)
 
     def to_json(self):
         return json.dumps(self.log, indent=2)

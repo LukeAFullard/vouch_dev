@@ -10,7 +10,7 @@ class CryptoManager:
     """
 
     @staticmethod
-    def generate_keys(private_key_path, public_key_path):
+    def generate_keys(private_key_path, public_key_path, password=None):
         """
         Generates a new RSA key pair and saves them to disk.
         """
@@ -19,12 +19,19 @@ class CryptoManager:
             key_size=2048,
         )
 
+        if password:
+            if isinstance(password, str):
+                password = password.encode('utf-8')
+            encryption_algorithm = serialization.BestAvailableEncryption(password)
+        else:
+            encryption_algorithm = serialization.NoEncryption()
+
         # Save private key
         with open(private_key_path, "wb") as f:
             f.write(private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption() # For simplicity in this demo. Real world should use BestAvailableEncryption
+                encryption_algorithm=encryption_algorithm
             ))
 
         public_key = private_key.public_key()
@@ -37,11 +44,14 @@ class CryptoManager:
             ))
 
     @staticmethod
-    def load_private_key(path):
+    def load_private_key(path, password=None):
+        if password and isinstance(password, str):
+            password = password.encode('utf-8')
+
         with open(path, "rb") as key_file:
             return serialization.load_pem_private_key(
                 key_file.read(),
-                password=None,
+                password=password,
             )
 
     @staticmethod

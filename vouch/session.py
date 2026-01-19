@@ -5,6 +5,7 @@ import json
 import zipfile
 import tempfile
 import shutil
+import random
 from .logger import Logger
 from .crypto import CryptoManager
 from .hasher import Hasher
@@ -13,13 +14,14 @@ from cryptography.hazmat.primitives import serialization
 class TraceSession:
     _active_session = None
 
-    def __init__(self, filename, strict=True, seed=None, private_key_path=None):
+    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None):
         self.filename = filename
         self.strict = strict
         self.seed = seed
         self.logger = Logger()
         self.temp_dir = None
         self.private_key_path = private_key_path
+        self.private_key_password = private_key_password
         self.artifacts = {} # Map arcname -> local_path
 
     def __enter__(self):
@@ -32,6 +34,16 @@ class TraceSession:
 
         # Create data directory for captured files
         os.makedirs(os.path.join(self.temp_dir, "data"))
+
+        # Enforce seed
+        if self.seed is not None:
+            random.seed(self.seed)
+            try:
+                import numpy as np
+                np.random.seed(self.seed)
+            except ImportError:
+                pass
+            self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
 
         return self
 
@@ -89,6 +101,19 @@ class TraceSession:
 
         self.artifacts[arcname] = filepath
 
+    def track_file(self, filepath):
+        """
+        Manually log a file's hash in the audit trail without bundling it.
+        """
+        if not os.path.exists(filepath):
+            if self.strict:
+                raise FileNotFoundError(f"File not found: {filepath}")
+            return
+
+        file_hash = Hasher.hash_file(filepath)
+        # We use log_call to insert it into the chain
+        self.logger.log_call("track_file", [filepath], {}, None, extra_hashes={"file_hash": file_hash})
+
     @classmethod
     def get_active_session(cls):
         return cls._active_session
@@ -137,12 +162,22 @@ class TraceSession:
 
     def _sign_artifacts(self, log_path):
         try:
-            private_key = CryptoManager.load_private_key(self.private_key_path)
+            private_key = CryptoManager.load_private_key(
+                self.private_key_path,
+                password=self.private_key_password
+            )
 
             # Sign audit_log.json
             signature = CryptoManager.sign_file(private_key, log_path)
             with open(os.path.join(self.temp_dir, "signature.sig"), "wb") as f:
                 f.write(signature)
+
+            # Sign artifacts.json if it exists
+            artifacts_path = os.path.join(self.temp_dir, "artifacts.json")
+            if os.path.exists(artifacts_path):
+                signature = CryptoManager.sign_file(private_key, artifacts_path)
+                with open(os.path.join(self.temp_dir, "artifacts.json.sig"), "wb") as f:
+                    f.write(signature)
 
             # Export public key
             public_key = private_key.public_key()
