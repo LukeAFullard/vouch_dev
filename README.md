@@ -42,6 +42,11 @@ import pandas as pd
 
 # Automatically generates a timestamped audit file (e.g. audit_20231027_1000.vch)
 with vouch.vouch():
+    # Libraries imported *outside* the block are NOT automatically tracked
+    # unless you re-import them or use targets=['*'] (retroactive audit).
+    # For best results, import libraries inside the block or use the wildcard feature.
+    import pandas as pd
+
     df = pd.read_csv("data.csv")
     print(df.describe())
 ```
@@ -53,6 +58,7 @@ import vouch
 # Only decorate the entry point function
 @vouch.record
 def analyze():
+    # Import libraries inside the decorated function to ensure tracking
     import pandas as pd
     df = pd.read_csv("data.csv")
     return df.mean()
@@ -78,7 +84,7 @@ vouch verify audit_20231027_1000.vch
 
 ### Audit Everything (Wildcard)
 
-You can automatically audit **all** subsequently imported third-party libraries using the wildcard target. Vouch intelligently excludes standard library modules and testing tools.
+You can automatically audit **all** subsequently imported third-party libraries using the wildcard target. This also attempts to wrap previously imported libraries.
 
 ```python
 with vouch.start(targets=["*"]):
