@@ -107,7 +107,7 @@ class TestWeaknesses(unittest.TestCase):
         found = False
         for entry in log_data:
             if entry["target"] == "track_file":
-                if "extra_hashes" in entry and "file_hash" in entry["extra_hashes"]:
+                if "extra_hashes" in entry and "tracked_file_hash" in entry["extra_hashes"]:
                     found = True
                     break
         self.assertTrue(found, "track_file did not log file hash")

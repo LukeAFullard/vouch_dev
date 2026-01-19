@@ -101,7 +101,7 @@ class TestEdgeCases(unittest.TestCase):
                 f.write(f"content {i}")
             files.append((name, path))
 
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, capture_script=False) as sess:
             for name, path in files:
                 sess.add_artifact(path)
 

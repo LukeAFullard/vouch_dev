@@ -15,7 +15,7 @@ class TestInspector(unittest.TestCase):
         self.vch_file = os.path.join(self.test_dir, "inspect.vch")
 
         # Create a session to inspect
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, capture_script=False) as sess:
             sess.logger.log_call("func1", [], {}, "result")
             # Create dummy artifact
             art_path = os.path.join(self.test_dir, "art.txt")

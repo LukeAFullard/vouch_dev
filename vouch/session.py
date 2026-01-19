@@ -9,6 +9,8 @@ import random
 import inspect
 import builtins
 import logging
+from typing import Optional, Dict, Any, List
+
 import vouch
 from .logger import Logger
 
@@ -18,22 +20,47 @@ from .hasher import Hasher
 from cryptography.hazmat.primitives import serialization
 
 class TraceSession:
-    _active_session = None
+    """
+    A context manager that records library calls, hashes artifacts, and generates a verifiable audit package.
+    """
+    _active_session: Optional['TraceSession'] = None
 
-    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None, capture_script=True, auto_track_io=False):
+    def __init__(
+        self,
+        filename: str,
+        strict: bool = True,
+        seed: Optional[int] = None,
+        private_key_path: Optional[str] = None,
+        private_key_password: Optional[str] = None,
+        capture_script: bool = True,
+        auto_track_io: bool = False
+    ):
+        """
+        Initialize the TraceSession.
+
+        Args:
+            filename: Path to the output .vch file.
+            strict: If True, raises exceptions for missing files or keys; otherwise warns.
+            seed: Seed for random number generators (random, numpy).
+            private_key_path: Path to the RSA private key for signing.
+            private_key_password: Password for the private key.
+            capture_script: If True, captures the calling script as an artifact.
+            auto_track_io: If True, hooks builtins.open to track all file reads.
+        """
         self.filename = filename
         self.strict = strict
         self.seed = seed
         self.logger = Logger()
-        self.temp_dir = None
+        self.temp_dir: Optional[str] = None
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
         self.capture_script = capture_script
         self.auto_track_io = auto_track_io
-        self.artifacts = {} # Map arcname -> local_path
-        self._original_open = None
+        self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
+        self._original_open: Optional[Any] = None
+        self._in_tracked_open = False
 
-    def __enter__(self):
+    def __enter__(self) -> 'TraceSession':
         if TraceSession._active_session is not None:
             raise RuntimeError("Nested TraceSessions are not supported.")
         TraceSession._active_session = self
@@ -97,13 +124,18 @@ class TraceSession:
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
 
-    def add_artifact(self, filepath, arcname=None):
+    def add_artifact(self, filepath: str, arcname: Optional[str] = None) -> None:
         """
         Mark a file to be included in the .vch package.
 
-        :param filepath: Local path to the file.
-        :param arcname: Name to store it as in the zip (default: basename of filepath).
-                        It will be placed under the 'data/' folder.
+        Args:
+            filepath: Local path to the file.
+            arcname: Name to store it as in the zip (default: basename of filepath).
+                     It will be placed under the 'data/' folder.
+
+        Raises:
+            FileNotFoundError: If strict mode is on and file is missing.
+            ValueError: If arcname contains path traversal characters.
         """
         if not os.path.exists(filepath):
             if self.strict:
@@ -122,9 +154,15 @@ class TraceSession:
 
         self.artifacts[arcname] = filepath
 
-    def track_file(self, filepath):
+    def track_file(self, filepath: str) -> None:
         """
         Manually log a file's hash in the audit trail without bundling it.
+
+        Args:
+            filepath: Path to the file to track.
+
+        Raises:
+            FileNotFoundError: If strict mode is on and file is missing.
         """
         if not os.path.exists(filepath):
             if self.strict:
@@ -136,14 +174,18 @@ class TraceSession:
         self.logger.log_call("track_file", [filepath], {}, None,
             extra_hashes={"tracked_file_hash": file_hash, "tracked_path": filepath})
 
-    def annotate(self, key, value):
+    def annotate(self, key: str, value: Any) -> None:
         """
         Add a metadata annotation to the audit log.
+
+        Args:
+            key: Metadata key.
+            value: Metadata value.
         """
         self.logger.log_call("annotate", [key, value], {}, None)
 
     @classmethod
-    def get_active_session(cls):
+    def get_active_session(cls) -> Optional['TraceSession']:
         return cls._active_session
 
     def _check_rng_usage(self):
