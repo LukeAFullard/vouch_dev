@@ -13,14 +13,21 @@ class CryptoManager:
     """
 
     @staticmethod
+    def generate_ephemeral_private_key():
+        """
+        Generates an ephemeral RSA private key in memory.
+        """
+        return rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+
+    @staticmethod
     def generate_keys(private_key_path, public_key_path, password=None, cert_path=None, days=365):
         """
         Generates a new RSA key pair and optionally a self-signed certificate.
         """
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-        )
+        private_key = CryptoManager.generate_ephemeral_private_key()
 
         if password:
             if isinstance(password, str):
