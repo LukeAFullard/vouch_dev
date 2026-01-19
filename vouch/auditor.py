@@ -1,29 +1,40 @@
 import functools
 import os
+import logging
+from typing import Any, Optional, Callable
 from .session import TraceSession
 from .hasher import Hasher
 
+logger = logging.getLogger(__name__)
+
 class Auditor:
     """
-    A wrapper proxy that intercepts attribute access and function calls.
+    A wrapper proxy that intercepts attribute access and function calls for auditing.
     """
-    def __init__(self, target, name=None):
+    def __init__(self, target: Any, name: Optional[str] = None):
+        """
+        Initialize the Auditor.
+
+        Args:
+            target: The object to wrap.
+            name: The name of the object (used in logs).
+        """
         self._target = target
         self._name = name or getattr(target, "__name__", str(target))
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value: Any) -> None:
         if name in ("_target", "_name"):
             super().__setattr__(name, value)
         else:
             setattr(self._target, name, value)
 
-    def __delattr__(self, name):
+    def __delattr__(self, name: str) -> None:
         if name in ("_target", "_name"):
             super().__delattr__(name)
         else:
             delattr(self._target, name)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         # Pass through dunder methods or internal attributes to avoid issues
         if name.startswith("_"):
             return getattr(self._target, name)
@@ -40,9 +51,9 @@ class Auditor:
 
         return Auditor(attr, name=f"{self._name}.{name}")
 
-    def _wrap_callable(self, func, func_name):
+    def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Execute the actual function
             result = func(*args, **kwargs)
 
@@ -60,8 +71,10 @@ class Auditor:
                             file_hash = Hasher.hash_file(args[0])
                             extra_hashes["arg_0_file_hash"] = file_hash
                             extra_hashes["arg_0_path"] = args[0]
-                        except Exception:
-                            pass
+                        except (IOError, OSError) as e:
+                            logger.warning(f"Failed to hash file {args[0]}: {e}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
                     # Check common kwargs for file paths
                     # specific to pandas.read_csv(filepath_or_buffer=...) or generic
@@ -71,8 +84,10 @@ class Auditor:
                                 file_hash = Hasher.hash_file(val)
                                 extra_hashes[f"kwarg_{key}_file_hash"] = file_hash
                                 extra_hashes[f"kwarg_{key}_path"] = val
-                             except Exception:
-                                pass
+                             except (IOError, OSError) as e:
+                                logger.warning(f"Failed to hash file {val}: {e}")
+                             except Exception as e:
+                                logger.error(f"Unexpected error hashing {val}: {e}")
 
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 

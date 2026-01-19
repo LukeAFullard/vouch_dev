@@ -6,26 +6,64 @@ import zipfile
 import tempfile
 import shutil
 import random
+import inspect
+import builtins
+import logging
+from typing import Optional, Dict, Any, List
+
 import vouch
 from .logger import Logger
+
+logger = logging.getLogger(__name__)
 from .crypto import CryptoManager
 from .hasher import Hasher
 from cryptography.hazmat.primitives import serialization
 
 class TraceSession:
-    _active_session = None
+    """
+    A context manager that records library calls, hashes artifacts, and generates a verifiable audit package.
+    """
+    _active_session: Optional['TraceSession'] = None
 
-    def __init__(self, filename, strict=True, seed=None, private_key_path=None, private_key_password=None):
+    def __init__(
+        self,
+        filename: str,
+        strict: bool = True,
+        seed: Optional[int] = None,
+        private_key_path: Optional[str] = None,
+        private_key_password: Optional[str] = None,
+        capture_script: bool = True,
+        auto_track_io: bool = False,
+        max_artifact_size: int = 1024 * 1024 * 1024
+    ):
+        """
+        Initialize the TraceSession.
+
+        Args:
+            filename: Path to the output .vch file.
+            strict: If True, raises exceptions for missing files or keys; otherwise warns.
+            seed: Seed for random number generators (random, numpy).
+            private_key_path: Path to the RSA private key for signing.
+            private_key_password: Password for the private key.
+            capture_script: If True, captures the calling script as an artifact.
+            auto_track_io: If True, hooks builtins.open to track all file reads.
+            max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
+        """
         self.filename = filename
         self.strict = strict
         self.seed = seed
         self.logger = Logger()
-        self.temp_dir = None
+        self.temp_dir: Optional[str] = None
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
-        self.artifacts = {} # Map arcname -> local_path
+        self.capture_script = capture_script
+        self.auto_track_io = auto_track_io
+        self.max_artifact_size = max_artifact_size
+        self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
+        self._original_open: Optional[Any] = None
+        self._in_tracked_open = False
 
-    def __enter__(self):
+    def __enter__(self) -> 'TraceSession':
         if TraceSession._active_session is not None:
             raise RuntimeError("Nested TraceSessions are not supported.")
         TraceSession._active_session = self
@@ -46,9 +84,21 @@ class TraceSession:
                 pass
             self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
 
+        self._check_rng_usage()
+
+        if self.capture_script:
+            self._capture_calling_script()
+
+        if self.auto_track_io:
+            self._hook_open()
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._original_open:
+            builtins.open = self._original_open
+            self._original_open = None
+
         TraceSession._active_session = None
 
         try:
@@ -77,18 +127,26 @@ class TraceSession:
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
 
-    def add_artifact(self, filepath, arcname=None):
+    def add_artifact(self, filepath: str, arcname: Optional[str] = None) -> None:
         """
         Mark a file to be included in the .vch package.
 
-        :param filepath: Local path to the file.
-        :param arcname: Name to store it as in the zip (default: basename of filepath).
-                        It will be placed under the 'data/' folder.
+        Args:
+            filepath: Local path to the file.
+            arcname: Name to store it as in the zip (default: basename of filepath).
+                     It will be placed under the 'data/' folder.
+
+        Raises:
+            FileNotFoundError: If strict mode is on and file is missing.
+            ValueError: If arcname contains path traversal characters or file exceeds max size.
         """
         if not os.path.exists(filepath):
             if self.strict:
                 raise FileNotFoundError(f"Artifact not found: {filepath}")
             return
+
+        if self.strict and os.path.getsize(filepath) > self.max_artifact_size:
+            raise ValueError(f"Artifact exceeds maximum size ({self.max_artifact_size} bytes): {filepath}")
 
         if arcname is None:
             arcname = os.path.basename(filepath)
@@ -102,9 +160,15 @@ class TraceSession:
 
         self.artifacts[arcname] = filepath
 
-    def track_file(self, filepath):
+    def track_file(self, filepath: str) -> None:
         """
         Manually log a file's hash in the audit trail without bundling it.
+
+        Args:
+            filepath: Path to the file to track.
+
+        Raises:
+            FileNotFoundError: If strict mode is on and file is missing.
         """
         if not os.path.exists(filepath):
             if self.strict:
@@ -113,11 +177,65 @@ class TraceSession:
 
         file_hash = Hasher.hash_file(filepath)
         # We use log_call to insert it into the chain
-        self.logger.log_call("track_file", [filepath], {}, None, extra_hashes={"file_hash": file_hash})
+        self.logger.log_call("track_file", [filepath], {}, None,
+            extra_hashes={"tracked_file_hash": file_hash, "tracked_path": filepath})
+
+    def annotate(self, key: str, value: Any) -> None:
+        """
+        Add a metadata annotation to the audit log.
+
+        Args:
+            key: Metadata key.
+            value: Metadata value.
+        """
+        self.logger.log_call("annotate", [key, value], {}, None)
 
     @classmethod
-    def get_active_session(cls):
+    def get_active_session(cls) -> Optional['TraceSession']:
         return cls._active_session
+
+    def _check_rng_usage(self):
+        if 'torch' in sys.modules:
+             logger.warning("PyTorch detected. Please ensure you manually seed it with torch.manual_seed(seed).")
+        if 'tensorflow' in sys.modules:
+             logger.warning("TensorFlow detected. Please ensure you manually seed it with tf.random.set_seed(seed).")
+
+    def _capture_calling_script(self):
+        try:
+            # Stack: 0=this, 1=__enter__, 2=caller
+            frame = inspect.stack()[2]
+            module = inspect.getmodule(frame[0])
+            if module and hasattr(module, '__file__') and module.__file__:
+                script_path = os.path.abspath(module.__file__)
+                if os.path.exists(script_path):
+                     # Add as artifact
+                     # Use a special name
+                     self.add_artifact(script_path, arcname=f"__script__{os.path.basename(script_path)}")
+        except Exception as e:
+            logger.warning(f"Failed to capture calling script: {e}")
+
+    def _hook_open(self):
+        self._original_open = builtins.open
+
+        def tracked_open(file, mode='r', *args, **kwargs):
+            result = self._original_open(file, mode, *args, **kwargs)
+
+            # Recursion guard
+            if not getattr(self, '_in_tracked_open', False):
+                try:
+                    self._in_tracked_open = True
+                    # Check if file is string and opened for reading
+                    if isinstance(file, str) and ('r' in mode or 'rb' in mode):
+                         if os.path.exists(file):
+                             self.track_file(file)
+                except Exception:
+                    pass
+                finally:
+                    self._in_tracked_open = False
+
+            return result
+
+        builtins.open = tracked_open
 
     def _capture_environment(self, filepath):
         try:
@@ -151,6 +269,14 @@ class TraceSession:
                 sys.stdout.flush()
 
             dst_path = os.path.join(data_dir, name)
+
+            # Check file size
+            try:
+                if os.path.getsize(src_path) > self.max_artifact_size:
+                    print(f"Warning: Skipping artifact {name} (exceeds max size)")
+                    continue
+            except OSError:
+                 pass # Will fail copy later or handled elsewhere
 
             # Double check destination is within data_dir
             try:

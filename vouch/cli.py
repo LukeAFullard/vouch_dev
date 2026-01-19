@@ -217,6 +217,63 @@ def verify(args):
                 print(f"  [FAIL] Data Integrity: Mismatched/Corrupted (Hash {data_hash} not found in log)")
                 sys.exit(1)
 
+        # Auto-verify referenced files
+        if args.auto_data:
+            print("  [...] Auto-verifying referenced files...")
+            auto_data_dir = args.auto_data_dir if args.auto_data_dir else "."
+
+            with open(os.path.join(temp_dir, "audit_log.json"), "r") as f:
+                log = json.load(f)
+
+            referenced_files = {} # path -> expected_hash
+
+            for entry in log:
+                if "extra_hashes" in entry:
+                    extras = entry["extra_hashes"]
+                    # Look for keys ending in _path
+                    for key, path in extras.items():
+                        if key.endswith("_path") and isinstance(path, str):
+                            # Find corresponding hash key
+                            hash_key = key.replace("_path", "_file_hash")
+                            if hash_key in extras:
+                                referenced_files[path] = extras[hash_key]
+
+            if not referenced_files:
+                print("    No external file references found in log.")
+            else:
+                all_auto_valid = True
+                for path, expected_hash in referenced_files.items():
+                    # Resolve path
+                    if os.path.isabs(path):
+                        target_path = path
+                    else:
+                        target_path = os.path.join(auto_data_dir, path)
+
+                    if not os.path.exists(target_path):
+                         # If absolute path didn't work, try relative to auto_data_dir as fallback?
+                         # Or just report missing.
+                         # For now, strict check on location.
+                         # But also try basename relative to auto_data_dir for convenience
+                         fallback_path = os.path.join(auto_data_dir, os.path.basename(path))
+                         if os.path.exists(fallback_path):
+                             target_path = fallback_path
+                         else:
+                            print(f"    [SKIP] {path} (Not found)")
+                            continue
+
+                    current_hash = Hasher.hash_file(target_path)
+                    if current_hash == expected_hash:
+                        print(f"    [OK] {target_path}")
+                    else:
+                        print(f"    [FAIL] {target_path} (Hash mismatch)")
+                        all_auto_valid = False
+
+                if not all_auto_valid:
+                    print("  [FAIL] Auto-Data Verification: One or more files failed verification")
+                    sys.exit(1)
+                else:
+                    print("  [OK] Auto-Data Verification: Valid")
+
 def gen_keys(args):
     print("Generating RSA keys...")
     private = "id_rsa"
@@ -251,6 +308,8 @@ def main():
     verify_parser = subparsers.add_parser("verify", help="Verify a .vch package")
     verify_parser.add_argument("file", help="Path to .vch file")
     verify_parser.add_argument("--data", help="Verify data integrity against a local file")
+    verify_parser.add_argument("--auto-data", action="store_true", help="Automatically verify all files referenced in the log")
+    verify_parser.add_argument("--auto-data-dir", help="Directory to search for referenced files (default: current directory)")
 
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
