@@ -36,6 +36,10 @@ class VouchFinder(MetaPathFinder):
              self.excludes.update(sys.stdlib_module_names)
 
     def _should_audit(self, fullname):
+        # Explicit targets override strict exclusions
+        if fullname in self.targets:
+            return True
+
         if fullname in self.excludes:
             return False
         if any(fullname.startswith(p + ".") for p in self.excludes):

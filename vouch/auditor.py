@@ -1,6 +1,7 @@
 import functools
 import os
 import logging
+import inspect
 from typing import Any, Optional, Callable
 from .session import TraceSession
 from .hasher import Hasher
@@ -75,9 +76,10 @@ class Auditor:
 
         attr = getattr(self._target, name)
 
-        # If it's a class/type, do NOT wrap it to preserve isinstance checks
+        # If it's a class/type, allow wrapping it to intercept constructor calls
+        # But we must ensure it behaves like a type (callable)
         if isinstance(attr, type):
-            return attr
+            return self._wrap_class(attr, name)
 
         # If it's a callable (and not a class), wrap it
         if callable(attr):
@@ -85,6 +87,58 @@ class Auditor:
 
         # Recursively wrap attributes that are part of the library (heuristic)
         return Auditor(attr, name=f"{self._name}.{name}")
+
+    def _wrap_class(self, cls: type, cls_name: str) -> Any:
+        """
+        Wrap a class to intercept constructor calls.
+        Returns a callable proxy that mimics the class but returns wrapped instances.
+        """
+        return Auditor(cls, name=cls_name)
+
+    def __call__(self, *args, **kwargs):
+        """
+        Support calling the wrapped object (e.g. for class constructors or functors).
+        """
+        func = self._target
+        func_name = self._name
+
+        # Reuse wrap_callable logic inline
+        args = tuple(self._unwrap(a) for a in args)
+        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
+
+        # Inputs hashing
+        input_hashes = {}
+        if "read" in func_name or "load" in func_name:
+             input_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        result = func(*args, **kwargs)
+
+        # Outputs hashing
+        output_hashes = {}
+        if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+             output_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        extra_hashes = {**input_hashes, **output_hashes}
+
+        session = TraceSession.get_active_session()
+        if session:
+            # If it's a class constructor, log it as such
+            if isinstance(self._target, type):
+                 full_name = f"{self._name}.__init__" # Approximate
+            else:
+                 full_name = f"{self._name}"
+
+            session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
+
+        # Handle Async Coroutines
+        if inspect.iscoroutine(result):
+            return self._wrap_coroutine(result, f"{self._name}()")
+
+        # Handle Generators
+        if inspect.isgenerator(result):
+            return self._wrap_generator(result, f"{self._name}()")
+
+        return self._wrap_result(result, name_hint=f"{self._name}()")
 
     def _hash_arguments(self, func_name, args, kwargs):
         """Helper to hash file paths found in arguments."""
@@ -146,9 +200,33 @@ class Auditor:
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
+            # Handle Async Coroutines
+            if inspect.iscoroutine(result):
+                return self._wrap_coroutine(result, full_name)
+
+            # Handle Generators
+            if inspect.isgenerator(result):
+                return self._wrap_generator(result, full_name)
+
             return self._wrap_result(result, name_hint=f"{full_name}()")
 
         return wrapper
+
+    async def _wrap_coroutine(self, coro, name_hint):
+        """Wrapper for async functions (coroutines)."""
+        try:
+            result = await coro
+            return self._wrap_result(result, name_hint=f"{name_hint} (async)")
+        except Exception:
+            raise
+
+    def _wrap_generator(self, gen, name_hint):
+        """Wrapper for generators."""
+        try:
+            for item in gen:
+                yield self._wrap_result(item, name_hint=f"{name_hint} (yield)")
+        except Exception:
+            raise
 
     # --- Proxy Dunder Methods ---
 

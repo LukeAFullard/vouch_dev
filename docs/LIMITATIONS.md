@@ -2,33 +2,22 @@
 
 Vouch provides powerful auditing capabilities through library proxying, but it relies on Python's dynamic nature and has specific boundaries where tracking may be lost.
 
-## 1. Class Constructors
+## 1. Strict Type Checking
 
-Vouch proxies module attributes to wrap functions and objects. However, it explicitly avoids wrapping **classes** (types) to preserve `isinstance` checks.
+The `Auditor` wrapper is a proxy object. While it works with most duck-typing scenarios and tries to be transparent, it will fail strict type checks:
 
-This means that calling a class constructor directly (e.g. `pd.DataFrame(...)`) will return an **unwrapped** object.
-
-**Workaround:**
-Use factory functions where available (e.g. `pd.read_csv`, `pd.to_datetime`, `pd.concat`) which return wrapped objects. Alternatively, ensure the object is passed to a wrapped function later, which will log the interaction but not the creation.
+*   `type(wrapped_obj) is TargetType` will verify as `False`.
+*   C-extensions that perform strict type checking at the C level may reject wrapped objects.
+*   `isinstance(wrapped_obj, TargetType)` may fail depending on how the type check is implemented (since `wrapped_obj` is an instance of `Auditor`).
 
 ## 2. Built-in Types
 
 Vouch does not wrap standard Python types like `list`, `dict`, `int`, or `str`. If a library function converts data to a standard type (e.g. `df.to_dict()`), tracking stops for that data structure.
 
-## 3. Async and Generators
+## 3. Standard Library (Opt-In)
 
-Vouch does not automatically intercept values produced by `async` functions (coroutines) or generators.
+By default, Vouch excludes standard library modules (e.g., `json`, `math`, `os`) to prevent stability issues. However, you can opt-in to audit specific standard library modules by listing them explicitly in the `targets` list (e.g., `targets=["json"]`).
 
-*   **Async/Await:** The `Auditor` wraps the function call that returns the coroutine, but it does not wrap the coroutine itself to intercept the `await` result.
-*   **Generators:** The `Auditor` does not wrap the generator object to intercept yielded values.
+## 4. Class Constructors (Proxied)
 
-## 4. Strict Type Checking
-
-The `Auditor` wrapper is a proxy object. While it works with most duck-typing scenarios, it will fail strict type checks:
-
-*   `type(wrapped_obj) is TargetType` will verify as `False`.
-*   C-extensions that perform strict type checking at the C level may reject wrapped objects.
-
-## 5. Standard Library
-
-Vouch explicitly excludes standard library modules (e.g., `json`, `math`, `os`) from automatic auditing to prevent stability issues and infinite recursion in internal tools.
+Vouch now wraps class constructors (e.g., `pd.DataFrame()`) to return wrapped instances. However, because the class itself is wrapped in an `Auditor` proxy, using the class object in strict type checks (e.g. `isinstance(obj, pd.DataFrame)`) where `pd.DataFrame` is the wrapper might behave unexpectedly compared to using the original class.
