@@ -7,6 +7,7 @@ import shutil
 import json
 from .crypto import CryptoManager
 from .hasher import Hasher
+from .reporter import Reporter
 
 def verify(args):
     filepath = args.file
@@ -203,6 +204,15 @@ def gen_keys(args):
     CryptoManager.generate_keys(private, public, password=args.password)
     print(f"Generated {private} and {public}")
 
+def report(args):
+    print(f"Generating report for {args.file}...")
+    try:
+        Reporter.generate_report(args.file, args.output)
+        print(f"Report saved to {args.output}")
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(description="Vouch: Forensic Audit Wrapper")
     subparsers = parser.add_subparsers(dest="command")
@@ -217,12 +227,19 @@ def main():
     gen_keys_parser.add_argument("--name", help="Base name for keys (default: id_rsa)")
     gen_keys_parser.add_argument("--password", help="Password for private key encryption")
 
+    # report
+    report_parser = subparsers.add_parser("report", help="Generate an HTML report")
+    report_parser.add_argument("file", help="Path to .vch file")
+    report_parser.add_argument("output", help="Path to output HTML file")
+
     args = parser.parse_args()
 
     if args.command == "verify":
         verify(args)
     elif args.command == "gen-keys":
         gen_keys(args)
+    elif args.command == "report":
+        report(args)
     else:
         parser.print_help()
 
