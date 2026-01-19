@@ -7,6 +7,7 @@ import tempfile
 import shutil
 from .logger import Logger
 from .crypto import CryptoManager
+from .hasher import Hasher
 from cryptography.hazmat.primitives import serialization
 
 class TraceSession:
@@ -19,6 +20,7 @@ class TraceSession:
         self.logger = Logger()
         self.temp_dir = None
         self.private_key_path = private_key_path
+        self.artifacts = {} # Map arcname -> local_path
 
     def __enter__(self):
         if TraceSession._active_session is not None:
@@ -27,6 +29,9 @@ class TraceSession:
 
         # Setup temporary directory for artifacts
         self.temp_dir = tempfile.mkdtemp()
+
+        # Create data directory for captured files
+        os.makedirs(os.path.join(self.temp_dir, "data"))
 
         return self
 
@@ -42,19 +47,40 @@ class TraceSession:
             env_path = os.path.join(self.temp_dir, "environment.lock")
             self._capture_environment(env_path)
 
-            # 3. Sign artifacts if private key is available
+            # 3. Process captured artifacts
+            self._process_artifacts()
+
+            # 4. Sign artifacts if private key is available
             if self.private_key_path and os.path.exists(self.private_key_path):
                 self._sign_artifacts(log_path)
             elif self.strict and self.private_key_path:
                  raise FileNotFoundError(f"Private key not found at {self.private_key_path}")
 
 
-            # 4. Create the .vch package (zip)
+            # 5. Create the .vch package (zip)
             self._package_artifacts()
 
         finally:
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
+
+    def add_artifact(self, filepath, arcname=None):
+        """
+        Mark a file to be included in the .vch package.
+
+        :param filepath: Local path to the file.
+        :param arcname: Name to store it as in the zip (default: basename of filepath).
+                        It will be placed under the 'data/' folder.
+        """
+        if not os.path.exists(filepath):
+            if self.strict:
+                raise FileNotFoundError(f"Artifact not found: {filepath}")
+            return
+
+        if arcname is None:
+            arcname = os.path.basename(filepath)
+
+        self.artifacts[arcname] = filepath
 
     @classmethod
     def get_active_session(cls):
@@ -74,6 +100,24 @@ class TraceSession:
 
         with open(filepath, 'w') as f:
             json.dump(env_info, f, indent=2)
+
+    def _process_artifacts(self):
+        """
+        Copies registered artifacts to temp_dir/data and creates artifacts.json
+        """
+        manifest = {}
+        data_dir = os.path.join(self.temp_dir, "data")
+
+        for name, src_path in self.artifacts.items():
+            dst_path = os.path.join(data_dir, name)
+            shutil.copy2(src_path, dst_path)
+
+            # Hash the file
+            file_hash = Hasher.hash_file(dst_path)
+            manifest[name] = file_hash
+
+        with open(os.path.join(self.temp_dir, "artifacts.json"), "w") as f:
+            json.dump(manifest, f, indent=2)
 
     def _sign_artifacts(self, log_path):
         try:

@@ -69,6 +69,12 @@ def inspect_vch(filename):
             env_data = json.load(f)
             print(json.dumps(env_data, indent=2))
 
+        if "artifacts.json" in z.namelist():
+            print("\n--- Captured Artifacts ---")
+            with z.open("artifacts.json") as f:
+                artifacts = json.load(f)
+                print(json.dumps(artifacts, indent=2))
+
 if __name__ == "__main__":
     vch_file = "example_audit.vch"
     try:

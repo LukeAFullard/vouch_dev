@@ -46,14 +46,52 @@ def verify(args):
             print(f"  [FAIL] Signature Verification: Invalid ({e})")
             sys.exit(1)
 
-        # Verify Data if provided
+        # Verify Captured Artifacts if present
+        artifacts_json_path = os.path.join(temp_dir, "artifacts.json")
+        if os.path.exists(artifacts_json_path):
+            print("  [...] Verifying captured artifacts...")
+            try:
+                with open(artifacts_json_path, "r") as f:
+                    manifest = json.load(f)
+
+                data_dir = os.path.join(temp_dir, "data")
+                all_valid = True
+
+                for name, expected_hash in manifest.items():
+                    artifact_path = os.path.join(data_dir, name)
+                    if not os.path.exists(artifact_path):
+                        print(f"    [FAIL] Missing artifact: {name}")
+                        all_valid = False
+                        continue
+
+                    actual_hash = Hasher.hash_file(artifact_path)
+                    if actual_hash == expected_hash:
+                        print(f"    [OK] {name}")
+                    else:
+                        print(f"    [FAIL] {name} (Hash Mismatch)")
+                        all_valid = False
+
+                if all_valid:
+                    print("  [OK] Captured Artifacts Integrity: Valid")
+                else:
+                    print("  [FAIL] Captured Artifacts Integrity: One or more files corrupted")
+                    # Should we exit 1 here? The core log is valid, but artifacts are wrong.
+                    # Let's count it as a failure.
+                    sys.exit(1)
+
+            except Exception as e:
+                print(f"  [FAIL] Artifact Verification Error: {e}")
+                sys.exit(1)
+
+
+        # Verify Data if provided (External verification)
         if data_file:
             if not os.path.exists(data_file):
                 print(f"Error: Data file {data_file} not found.")
                 sys.exit(1)
 
             data_hash = Hasher.hash_file(data_file)
-            print(f"  [...] Verifying data file: {data_file}")
+            print(f"  [...] Verifying external data file: {data_file}")
             print(f"        Hash: {data_hash}")
 
             # Load log and search for hash
