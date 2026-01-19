@@ -14,3 +14,21 @@ Use factory functions where available (e.g. `pd.read_csv`, `pd.to_datetime`, `pd
 ## 2. Built-in Types
 
 Vouch does not wrap standard Python types like `list`, `dict`, `int`, or `str`. If a library function converts data to a standard type (e.g. `df.to_dict()`), tracking stops for that data structure.
+
+## 3. Async and Generators
+
+Vouch does not automatically intercept values produced by `async` functions (coroutines) or generators.
+
+*   **Async/Await:** The `Auditor` wraps the function call that returns the coroutine, but it does not wrap the coroutine itself to intercept the `await` result.
+*   **Generators:** The `Auditor` does not wrap the generator object to intercept yielded values.
+
+## 4. Strict Type Checking
+
+The `Auditor` wrapper is a proxy object. While it works with most duck-typing scenarios, it will fail strict type checks:
+
+*   `type(wrapped_obj) is TargetType` will verify as `False`.
+*   C-extensions that perform strict type checking at the C level may reject wrapped objects.
+
+## 5. Standard Library
+
+Vouch explicitly excludes standard library modules (e.g., `json`, `math`, `os`) from automatic auditing to prevent stability issues and infinite recursion in internal tools.
