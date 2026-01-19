@@ -23,4 +23,6 @@ with TraceSession("timestamped_audit.vch",
         print("Work done.")
 
 print("\nVerifying the package...")
+# Note: In a real environment, you might need to supply the CA cert:
+# vouch verify timestamped_audit.vch --tsa-ca-file /path/to/cacert.pem
 os.system("vouch verify timestamped_audit.vch")
