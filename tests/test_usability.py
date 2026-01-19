@@ -8,7 +8,7 @@ from io import StringIO
 from unittest.mock import patch
 from vouch.session import TraceSession
 from vouch.crypto import CryptoManager
-from vouch.cli import verify
+from vouch.cli import verify, main
 from argparse import Namespace
 
 class TestUsability(unittest.TestCase):
@@ -115,6 +115,18 @@ class TestUsability(unittest.TestCase):
         self.assertIn("Auto-verifying referenced files", output)
         self.assertIn("[OK] Auto-Data Verification: Valid", output)
         self.assertIn(f"[OK] {data_file}", output)
+
+    def test_cli_argument_parsing(self):
+        """Test that the CLI parser accepts --tsa-ca-file"""
+        test_args = ["vouch", "verify", "dummy.vch", "--tsa-ca-file", "ca.pem"]
+        with patch.object(sys, 'argv', test_args):
+            # We want to verify that 'verify' is called with the correct args
+            # We can mock verify
+            with patch('vouch.cli.verify') as mock_verify:
+                main()
+                mock_verify.assert_called_once()
+                args = mock_verify.call_args[0][0]
+                self.assertEqual(args.tsa_ca_file, "ca.pem")
 
 if __name__ == "__main__":
     unittest.main()

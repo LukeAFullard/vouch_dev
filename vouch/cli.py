@@ -63,8 +63,12 @@ def verify(args):
                     print("    [OK] Timestamp Verified (Matches Log)")
                 else:
                     print("    [FAIL] Timestamp Verification Failed")
+                    if args.strict:
+                        sys.exit(1)
             except Exception as e:
                 print(f"    [FAIL] Timestamp Error: {e}")
+                if args.strict:
+                    sys.exit(1)
 
         # Verify Log Chain
         try:
@@ -328,6 +332,7 @@ def main():
     verify_parser.add_argument("--auto-data", action="store_true", help="Automatically verify all files referenced in the log")
     verify_parser.add_argument("--auto-data-dir", help="Directory to search for referenced files (default: current directory)")
     verify_parser.add_argument("--tsa-ca-file", help="Path to TSA CA certificate for timestamp verification")
+    verify_parser.add_argument("--strict", action="store_true", help="Fail verification if timestamp validation fails")
 
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
