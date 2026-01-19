@@ -160,6 +160,31 @@ See the [**Rerun Verification Walkthrough**](examples/RERUN_WALKTHROUGH.md).
 python3 examples/rerun_verification.py
 ```
 
+### Trusted Timestamping (RFC 3161)
+
+You can anchor your audit logs in time using a Trusted Timestamp Authority (TSA). This provides cryptographic proof that the data existed at a specific time.
+
+```bash
+python3 examples/timestamp_example.py
+```
+
+**Verification Output:**
+
+```text
+Verifying timestamped_audit.vch...
+  [OK] Signature Verification: Valid
+  [OK] Log Integrity: Valid
+  [...] Verifying Timestamp...
+    [OK] Timestamp Verified (Matches Log)
+  [...] Verifying log chain integrity...
+  [OK] Log Chain Integrity: Valid
+```
+
+*Note: You may need to provide the TSA's CA certificate for verification:*
+```bash
+vouch verify timestamped_audit.vch --tsa-ca-file cacert.pem
+```
+
 ## Documentation
 
 *   [**Tutorial: Sending an Audit Package**](TUTORIAL.md) - A step-by-step guide for Analysts and Auditors.

@@ -325,6 +325,7 @@ def main():
     verify_parser.add_argument("--data", help="Verify data integrity against a local file")
     verify_parser.add_argument("--auto-data", action="store_true", help="Automatically verify all files referenced in the log")
     verify_parser.add_argument("--auto-data-dir", help="Directory to search for referenced files (default: current directory)")
+    verify_parser.add_argument("--tsa-ca-file", help="Path to TSA CA certificate for timestamp verification")
 
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")
