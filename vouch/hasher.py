@@ -34,33 +34,39 @@ class Hasher:
                 hasher.update(str(key).encode('utf-8'))
                 hasher.update(Hasher.hash_object(obj[key]).encode('utf-8'))
         elif HAS_PANDAS and isinstance(obj, (pd.DataFrame, pd.Series)):
-             # "Smart Hashing" for pandas - using utility function or simple serialization for now
-             # A more robust implementation might hash the underlying numpy array
              try:
-                 # pandas.util.hash_pandas_object returns a series of hashes, one per row/index
-                 # We sum them or hash the concatenation to get a single hash
-                 # This is stable across some versions
-                 row_hashes = pd.util.hash_pandas_object(obj, index=True)
-                 hasher.update(row_hashes.values.tobytes())
+                 # Deterministic CSV serialization
+                 # float_format='%.17g' ensures full precision for floats
+                 csv_str = obj.to_csv(index=True, float_format='%.17g')
+                 hasher.update(csv_str.encode('utf-8'))
              except Exception:
-                 try:
-                     # Fallback 1: Hash underlying values directly (if numpy backed)
-                     hasher.update(obj.values.tobytes())
-                 except Exception:
-                     try:
-                         # Fallback 2: JSON serialization (catches all data, avoids truncation)
-                         # Use default_handler=str to handle non-serializable objects reasonably
-                         json_str = obj.to_json(default_handler=str, date_format='iso')
-                         hasher.update(json_str.encode('utf-8'))
-                     except Exception:
-                        # Final Fallback to string representation
-                        hasher.update(str(obj).encode('utf-8'))
+                 # Fallback to string representation
+                 hasher.update(str(obj).encode('utf-8'))
         elif HAS_PANDAS and isinstance(obj, np.ndarray):
             # Hash the raw bytes of the array
-            # Ensure it's contiguous
-            if not obj.flags['C_CONTIGUOUS']:
-                obj = np.ascontiguousarray(obj)
-            hasher.update(obj.tobytes())
+            if obj.nbytes > 100 * 1024 * 1024:  # >100MB
+                # Chunk it to avoid OOM
+                # Calculate chunk size based on row size to target ~100MB per chunk
+                if obj.shape[0] > 0:
+                    row_bytes = obj.nbytes // obj.shape[0]
+                    # Avoid division by zero if row_bytes is somehow 0 (e.g. empty dim in other axis?)
+                    if row_bytes > 0:
+                        chunk_size = max(1, (100 * 1024 * 1024) // row_bytes)
+                    else:
+                        chunk_size = 1000000 # Default fallback
+
+                    for i in range(0, obj.shape[0], chunk_size):
+                        chunk = obj[i:i+chunk_size]
+                        if not chunk.flags['C_CONTIGUOUS']:
+                            chunk = np.ascontiguousarray(chunk)
+                        hasher.update(chunk.tobytes())
+                else:
+                    hasher.update(obj.tobytes())
+            else:
+                # Ensure it's contiguous
+                if not obj.flags['C_CONTIGUOUS']:
+                    obj = np.ascontiguousarray(obj)
+                hasher.update(obj.tobytes())
         else:
             # Fallback for other objects
             hasher.update(str(obj).encode('utf-8'))

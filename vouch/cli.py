@@ -5,6 +5,7 @@ import zipfile
 import tempfile
 import shutil
 import json
+import vouch
 from .crypto import CryptoManager
 from .hasher import Hasher
 from .reporter import Reporter
@@ -88,6 +89,10 @@ def verify(args):
                 with open(env_lock_path, "r") as f:
                     env_info = json.load(f)
 
+                if "vouch_version" in env_info:
+                    if env_info["vouch_version"] != vouch.__version__:
+                        print(f"  [WARN] Created with Vouch {env_info['vouch_version']}, verifying with {vouch.__version__}")
+
                 recorded_version = env_info.get("python_version", "").split()[0]
                 current_version = sys.version.split()[0]
 
@@ -134,8 +139,14 @@ def verify(args):
 
                     artifact_path = os.path.join(data_dir, name)
                     # Double check that we are still inside data_dir
-                    if not os.path.commonpath([os.path.abspath(artifact_path), os.path.abspath(data_dir)]) == os.path.abspath(data_dir):
-                         print(f"    [FAIL] Malformed artifact path (traversal): {name}")
+                    try:
+                        common = os.path.commonpath([os.path.abspath(artifact_path), os.path.abspath(data_dir)])
+                        if common != os.path.abspath(data_dir):
+                             print(f"    [FAIL] Malformed artifact path (traversal): {name}")
+                             all_valid = False
+                             continue
+                    except ValueError:
+                         print(f"    [FAIL] Malformed artifact path (invalid/different drive): {name}")
                          all_valid = False
                          continue
 

@@ -69,6 +69,15 @@ Create a human-readable summary of the audit session.
 vouch report output.vch report.html --format html
 ```
 
+## ⚠️ Reproducibility Limitations
+
+Vouch enforces seeds for `random` and `numpy.random` only. If your analysis uses:
+- PyTorch: Add `torch.manual_seed(seed)`
+- TensorFlow: Add `tf.random.set_seed(seed)`
+- Other RNGs: Manually seed them inside your session
+
+The `secrets` module is intentionally NOT seeded (cryptographic use).
+
 ## Examples
 
 ### Generating Audit Reports
