@@ -10,6 +10,7 @@ from .crypto import CryptoManager
 from .hasher import Hasher
 from .reporter import Reporter
 from .differ import Differ
+from .inspector import InspectorShell
 
 def verify(args):
     filepath = args.file
@@ -239,6 +240,9 @@ def report(args):
 def diff(args):
     Differ.diff_sessions(args.file1, args.file2, args.show_hashes)
 
+def inspect(args):
+    InspectorShell(args.file).cmdloop()
+
 def main():
     parser = argparse.ArgumentParser(description="Vouch: Forensic Audit Wrapper")
     subparsers = parser.add_subparsers(dest="command")
@@ -265,6 +269,10 @@ def main():
     diff_parser.add_argument("file2", help="Path to second .vch file")
     diff_parser.add_argument("--show-hashes", action="store_true", help="Display full hashes for mismatches")
 
+    # inspect
+    inspect_parser = subparsers.add_parser("inspect", help="Interactive inspector")
+    inspect_parser.add_argument("file", help="Path to .vch file")
+
     args = parser.parse_args()
 
     if args.command == "verify":
@@ -275,6 +283,8 @@ def main():
         report(args)
     elif args.command == "diff":
         diff(args)
+    elif args.command == "inspect":
+        inspect(args)
     else:
         parser.print_help()
 
