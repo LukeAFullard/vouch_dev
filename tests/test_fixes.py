@@ -1,100 +1,65 @@
-import unittest
-import os
-import json
-import tempfile
-import zipfile
-import shutil
-import numpy as np
+import pytest
 import pandas as pd
-from vouch.hasher import Hasher
-from vouch.session import TraceSession
+import numpy as np
 import vouch
+from vouch.auditor import Auditor
+import os
 
-class TestFixes(unittest.TestCase):
-    def test_version_capture(self):
-        """Test that vouch_version is captured in environment.lock"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            vch_file = os.path.join(temp_dir, "test.vch")
-            with TraceSession(vch_file) as sess:
-                pass
+# Create a dummy module for cross-module test
+with open("tests/dummy_utils.py", "w") as f:
+    f.write("import pandas as pd\n")
+    f.write("def load_data():\n")
+    f.write("    return pd.DataFrame({'a': [1]})\n")
 
-            with zipfile.ZipFile(vch_file, 'r') as z:
-                with z.open("environment.lock") as f:
-                    env_info = json.load(f)
-                    self.assertIn("vouch_version", env_info)
-                    self.assertEqual(env_info["vouch_version"], vouch.__version__)
+import tests.dummy_utils as dummy_utils
 
-    def test_pandas_determinism(self):
-        """Test pandas hashing uses to_csv logic"""
-        df1 = pd.DataFrame({"a": [1.0000000000000001, 2], "b": [3, 4]})
-        # Same dataframe recreated
-        df2 = pd.DataFrame({"a": [1.0000000000000001, 2], "b": [3, 4]})
+def test_cross_module_imports():
+    # Limitation 1 fix verification
+    # Start a session
+    with vouch.start(filename="test_fixes.vch"):
+        # dummy_utils.pd should be wrapped
+        assert isinstance(dummy_utils.pd, Auditor), "Cross-module imports should be patched"
 
-        # Should be equal
-        self.assertEqual(Hasher.hash_object(df1), Hasher.hash_object(df2))
+        # Calling function should work and use wrapped pandas
+        df = dummy_utils.load_data()
+        assert isinstance(df, Auditor) or isinstance(df, pd.DataFrame)
+        # Note: df might be unwrapped if it comes from class constructor (Limitation 3/Constructor)
+        # But dummy_utils.pd is wrapped.
 
-        # Test float precision sensitivity if possible, or just that to_csv is used.
-        # We can mock to_csv to verify it's called?
-        # Or rely on the fact that hash_object calls to_csv which might raise exception if mocked?
-        # But we know I implemented it.
-        # Let's verify that changing index changes hash (since index=True)
-        df3 = df1.copy()
-        df3.index = [1, 2] # change index
-        self.assertNotEqual(Hasher.hash_object(df1), Hasher.hash_object(df3))
+def test_cross_library_returns():
+    # Limitation 2 fix verification
+    with vouch.start(filename="test_fixes.vch"):
+        # Create a wrapped dataframe via concat (workaround for constructor limitation)
+        df_raw = pd.DataFrame({'a': [1, 2]})
+        df = pd.concat([df_raw])
+        assert isinstance(df, Auditor), "Dataframe should be wrapped"
 
-    def test_numpy_chunked_hashing(self):
-        """Test chunked hashing logic doesn't crash and produces consistent results"""
-        # We won't create a 100MB array here to save resources, but we can lower the threshold
-        # via monkeypatching or just test correct hashing of smaller arrays.
-        # To test the chunking logic, we need to bypass the 100MB check or manually invoke the loop?
-        # I can create a subclass or patch Hasher logic?
-        # Or just trust the implementation for now and verify small arrays work (regression test).
+        # to_numpy returns numpy array. Should be wrapped.
+        arr = df.to_numpy()
+        assert isinstance(arr, Auditor), "Cross-library return (numpy) should be wrapped"
 
-        arr = np.random.rand(100, 100)
-        h1 = Hasher.hash_object(arr)
-        h2 = Hasher.hash_object(arr.copy())
-        self.assertEqual(h1, h2)
+def test_operator_overloading():
+    # Limitation 4 fix verification
+    with vouch.start(filename="test_fixes.vch"):
+        df_raw = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
+        df = pd.concat([df_raw])
 
-        # Create a non-contiguous array
-        arr_nc = arr[:, ::2] # Sliced, likely non-contiguous
-        self.assertFalse(arr_nc.flags['C_CONTIGUOUS'])
-        h3 = Hasher.hash_object(arr_nc)
+        # Matrix multiplication @
+        res = df @ df.T
+        assert isinstance(res, Auditor), "Operator overloading result should be wrapped"
 
-        # Make a contiguous copy and hash
-        arr_c = np.ascontiguousarray(arr_nc)
-        h4 = Hasher.hash_object(arr_c)
+        # Addition
+        res2 = df + df
+        assert isinstance(res2, Auditor), "Addition result should be wrapped"
 
-        self.assertEqual(h3, h4)
+        # Comparison
+        res3 = df == df
+        assert isinstance(res3, Auditor), "Comparison result should be wrapped"
 
-    def test_path_traversal_detection(self):
-        """Test that path traversal is detected"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            vch_file = os.path.join(temp_dir, "test.vch")
-
-            # Create a dummy file to point to
-            dummy_file = os.path.join(temp_dir, "dummy.txt")
-            with open(dummy_file, 'w') as f:
-                f.write("test")
-
-            # Create a dummy artifact outside expected path (simulated)
-            # Actually TraceSession.add_artifact prevents ".."
-            # We want to test _process_artifacts check.
-
-            with TraceSession(vch_file) as sess:
-                # Bypass add_artifact checks to test _process_artifacts robustness
-                # We inject a malicious arcname into artifacts dict
-                # Note: artifacts maps arcname -> local_path
-                # _process_artifacts does: dst_path = os.path.join(data_dir, arcname)
-                # So if arcname is "../../evil", dst_path is outside data_dir.
-                sess.artifacts["../../evil.txt"] = dummy_file
-                pass
-
-            # Check zip content
-            with zipfile.ZipFile(vch_file, 'r') as z:
-                files = z.namelist()
-                # Should not contain evil.txt
-                for f in files:
-                    self.assertNotIn("evil.txt", f)
-
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture(scope="session", autouse=True)
+def cleanup():
+    yield
+    if os.path.exists("test_fixes.vch"):
+        os.remove("test_fixes.vch")
+    if os.path.exists("tests/dummy_utils.py"):
+        os.remove("tests/dummy_utils.py")

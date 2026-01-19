@@ -34,9 +34,42 @@ class Auditor:
         else:
             delattr(self._target, name)
 
+    def _unwrap(self, obj: Any) -> Any:
+        if isinstance(obj, Auditor):
+            return obj._target
+        return obj
+
+    def _wrap_result(self, result, name_hint=""):
+        """Helper to deeply wrap results if they belong to tracked packages."""
+        if result is None:
+            return result
+
+        target_pkg = getattr(self._target, "__module__", "").split(".")[0]
+        if not target_pkg and hasattr(self._target, "__package__"):
+             target_pkg = self._target.__package__
+
+        if not target_pkg and "." in self._name:
+            target_pkg = self._name.split(".")[0]
+
+        res_mod = getattr(type(result), "__module__", "")
+
+        # Check active session for cross-library auditing
+        should_audit = False
+        session = TraceSession.get_active_session()
+
+        if session and res_mod:
+            # Check if the result module is one of the tracked targets
+            pkg_name = res_mod.split(".")[0]
+            if session.should_audit(pkg_name):
+                should_audit = True
+
+        if should_audit or (res_mod and res_mod.startswith(target_pkg)):
+            return Auditor(result, name=name_hint)
+
+        return result
+
     def __getattr__(self, name: str) -> Any:
         # Pass through dunder methods or internal attributes to avoid issues
-        # (Though __getattr__ is only called if not found)
         if name.startswith("_"):
             return getattr(self._target, name)
 
@@ -86,10 +119,11 @@ class Auditor:
     def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Unwrap arguments if they are Auditors
+            args = tuple(self._unwrap(a) for a in args)
+            kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
 
             # --- Pre-execution Hashing (Inputs) ---
-            # Capture inputs before execution (in case they change or are read)
-            # Typically for read_*, the file must exist before.
             input_hashes = {}
             if "read" in func_name or "load" in func_name:
                  input_hashes = self._hash_arguments(func_name, args, kwargs)
@@ -98,8 +132,6 @@ class Auditor:
             result = func(*args, **kwargs)
 
             # --- Post-execution Hashing (Outputs) ---
-            # Capture outputs after execution (file created)
-            # Typically for to_*, save_*, dump_*.
             output_hashes = {}
             if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
                  output_hashes = self._hash_arguments(func_name, args, kwargs)
@@ -114,28 +146,17 @@ class Auditor:
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
-            target_pkg = getattr(self._target, "__module__", "").split(".")[0]
-            if not target_pkg and hasattr(self._target, "__package__"):
-                 target_pkg = self._target.__package__
+            return self._wrap_result(result, name_hint=f"{full_name}()")
 
-            if not target_pkg and "." in self._name:
-                target_pkg = self._name.split(".")[0]
-
-            if target_pkg and result is not None:
-                res_mod = getattr(type(result), "__module__", "")
-                if res_mod and res_mod.startswith(target_pkg):
-                    return Auditor(result, name=f"{full_name}()")
-
-            return result
         return wrapper
 
     # --- Proxy Dunder Methods ---
 
     def __getitem__(self, key):
-        return self._target[key]
+        return self._wrap_result(self._target[self._unwrap(key)])
 
     def __setitem__(self, key, value):
-        self._target[key] = value
+        self._target[self._unwrap(key)] = self._unwrap(value)
 
     def __len__(self):
         return len(self._target)
@@ -148,29 +169,94 @@ class Auditor:
 
     # Arithmetic operators
     def __add__(self, other):
-        return self._target + other
+        return self._wrap_result(self._target + self._unwrap(other), f"{self._name} + {other}")
 
     def __sub__(self, other):
-        return self._target - other
+        return self._wrap_result(self._target - self._unwrap(other), f"{self._name} - {other}")
 
     def __mul__(self, other):
-        return self._target * other
+        return self._wrap_result(self._target * self._unwrap(other), f"{self._name} * {other}")
 
     def __truediv__(self, other):
-        return self._target / other
+        return self._wrap_result(self._target / self._unwrap(other), f"{self._name} / {other}")
 
     def __floordiv__(self, other):
-        return self._target // other
+        return self._wrap_result(self._target // self._unwrap(other), f"{self._name} // {other}")
 
     # Reverse arithmetic
     def __radd__(self, other):
-        return other + self._target
+        return self._wrap_result(self._unwrap(other) + self._target, f"{other} + {self._name}")
 
     def __rsub__(self, other):
-        return other - self._target
+        return self._wrap_result(self._unwrap(other) - self._target, f"{other} - {self._name}")
 
     def __rmul__(self, other):
-        return other * self._target
+        return self._wrap_result(self._unwrap(other) * self._target, f"{other} * {self._name}")
 
     def __repr__(self):
         return f"<Auditor({self._name}) wrapping {self._target}>"
+
+    # Matrix multiplication
+    def __matmul__(self, other):
+        return self._wrap_result(self._target @ self._unwrap(other), f"{self._name} @ {other}")
+
+    def __rmatmul__(self, other):
+        return self._wrap_result(self._unwrap(other) @ self._target, f"{other} @ {self._name}")
+
+    # Power
+    def __pow__(self, other):
+        return self._wrap_result(self._target ** self._unwrap(other), f"{self._name} ** {other}")
+
+    def __rpow__(self, other):
+        return self._wrap_result(self._unwrap(other) ** self._target, f"{other} ** {self._name}")
+
+    # Bitwise operators
+    def __and__(self, other):
+        return self._wrap_result(self._target & self._unwrap(other), f"{self._name} & {other}")
+
+    def __rand__(self, other):
+        return self._wrap_result(self._unwrap(other) & self._target, f"{other} & {self._name}")
+
+    def __or__(self, other):
+        return self._wrap_result(self._target | self._unwrap(other), f"{self._name} | {other}")
+
+    def __ror__(self, other):
+        return self._wrap_result(self._unwrap(other) | self._target, f"{other} | {self._name}")
+
+    def __xor__(self, other):
+        return self._wrap_result(self._target ^ self._unwrap(other), f"{self._name} ^ {other}")
+
+    def __rxor__(self, other):
+        return self._wrap_result(self._unwrap(other) ^ self._target, f"{other} ^ {self._name}")
+
+    def __invert__(self):
+        return self._wrap_result(~self._target, f"~{self._name}")
+
+    # Unary operators
+    def __neg__(self):
+        return self._wrap_result(-self._target, f"-{self._name}")
+
+    def __pos__(self):
+        return self._wrap_result(+self._target, f"+{self._name}")
+
+    def __abs__(self):
+        return self._wrap_result(abs(self._target), f"abs({self._name})")
+
+    # Comparison
+    def __eq__(self, other):
+        return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
+
+    def __ne__(self, other):
+        return self._wrap_result(self._target != self._unwrap(other), f"{self._name} != {other}")
+
+    def __lt__(self, other):
+        return self._wrap_result(self._target < self._unwrap(other), f"{self._name} < {other}")
+
+    def __le__(self, other):
+        return self._wrap_result(self._target <= self._unwrap(other), f"{self._name} <= {other}")
+
+    def __gt__(self, other):
+        return self._wrap_result(self._target > self._unwrap(other), f"{self._name} > {other}")
+
+    def __ge__(self, other):
+        return self._wrap_result(self._target >= self._unwrap(other), f"{self._name} >= {other}")

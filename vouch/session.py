@@ -87,6 +87,23 @@ class TraceSession:
         self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
         self._original_open: Optional[Any] = None
         self._in_tracked_open = False
+        self._finders = []
+
+    def register_finder(self, finder: Any) -> None:
+        """Register a finder to check which modules should be audited."""
+        if finder not in self._finders:
+            self._finders.append(finder)
+
+    def should_audit(self, module_name: str) -> bool:
+        """
+        Check if a module should be audited by querying registered finders.
+        """
+        if not module_name: return False
+        for finder in self._finders:
+            if hasattr(finder, '_should_audit'):
+                if finder._should_audit(module_name):
+                    return True
+        return False
 
     def __enter__(self) -> 'TraceSession':
         if getattr(TraceSession._active_session, 'session', None) is not None:
