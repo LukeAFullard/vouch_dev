@@ -4,6 +4,8 @@ This example demonstrates how to use the `@vouch.record` decorator to audit a da
 
 It specifically highlights Vouch's ability to **retroactively patch global imports**. This means you can import libraries like `pandas` at the top of your script, and Vouch will still capture their usage inside your functions, even if those functions are defined outside the decorated entry point.
 
+It also demonstrates **Deep Auditing**, where objects returned by libraries (like DataFrames) remain proxied, allowing chained operations (like `.to_csv()`) to be logged.
+
 ## The Code
 
 See `examples/decorator_example.py` for the complete runnable script.
@@ -22,7 +24,9 @@ See `examples/decorator_example.py` for the complete runnable script.
     def process_data():
         # Vouch patches 'pd' so this read is logged
         df = pd.read_csv("input_data.csv")
-        ...
+
+        # 'df' is automatically wrapped, so this write is also logged
+        df.to_csv("output_data.csv", index=False)
     ```
 
 3.  **Decorated Entry Point:**
@@ -57,23 +61,22 @@ Starting audited workflow...
 Workflow complete.
 
 --- Verification & Proof ---
-Generated audit file: audit_20231027_123456.vch
+Generated audit file: audit_20260119_113819.vch
 [OK] Audit package integrity verified.
 
-Inspecting logs for 'read_csv'...
+Inspecting logs for 'read_csv' and 'to_csv'...
   [Found] pandas.read_csv (read)
+  [Found] pandas.read_csv().to_csv (read)
+  [Found] pandas.read_csv().to_csv (write)
 
-[SUCCESS] The 'read_csv' call inside the helper function was captured!
-This proves that the global 'pd' variable was correctly patched.
+[SUCCESS] Both read and write operations inside the helper function were captured!
 ```
 
 ## How It Works
 
 When `@vouch.record` starts the session:
-1.  It identifies the "calling frame" (your script).
-2.  It scans the global variables of that script.
-3.  It finds variables (like `pd`) that point to libraries Vouch knows how to audit.
-4.  It replaces those variables with the wrapped `Auditor` proxies.
-5.  It executes your function.
+1.  **Global Patching**: It identifies the "calling frame" (your script) and scans its global variables. Any variables pointing to targeted libraries (like `pd`) are replaced with wrapped `Auditor` proxies.
+2.  **Deep Wrapping**: When you call `pd.read_csv(...)`, it returns a DataFrame. Vouch detects that this object belongs to the `pandas` package and automatically wraps it in a new `Auditor`.
+3.  **Chained Auditing**: When you subsequently call `df.to_csv(...)`, the wrapper intercepts this call and logs it, ensuring the output artifact is captured.
 
 This ensures comprehensive coverage without forcing you to change your import style.

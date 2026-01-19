@@ -19,13 +19,10 @@ def process_data():
     df = pd.read_csv("input_data.csv")
 
     # Simple calculation
+    # df is now wrapped (Auditor(DataFrame)), so operators must be proxied
     df['sum'] = df['a'] + df['b']
 
-    # Note: 'df' is a new object returned by read_csv.
-    # Vouch currently proxies the library ('pd'), but does not automatically
-    # wrap every returned object ('df'). So 'df.to_csv' might not be logged
-    # unless deeply integrated.
-    # However, the 'read_csv' call proves that the global 'pd' was audited.
+    # This write should be logged because df is wrapped
     df.to_csv("output_data.csv", index=False)
     return df['sum'].mean()
 
@@ -66,9 +63,10 @@ if __name__ == "__main__":
 
     # Inspect the log to prove function calls inside process_data were captured
     import zipfile, json
-    print("\nInspecting logs for 'read_csv'...")
+    print("\nInspecting logs for 'read_csv' and 'to_csv'...")
 
     found_read = False
+    found_write = False
 
     with zipfile.ZipFile(latest_file, 'r') as z:
         log = json.loads(z.read("audit_log.json"))
@@ -77,10 +75,12 @@ if __name__ == "__main__":
             if "read_csv" in target:
                 found_read = True
                 print(f"  [Found] {target} (read)")
+            if "to_csv" in target:
+                found_write = True
+                print(f"  [Found] {target} (write)")
 
-    if found_read:
-        print("\n[SUCCESS] The 'read_csv' call inside the helper function was captured!")
-        print("This proves that the global 'pd' variable was correctly patched.")
+    if found_read and found_write:
+        print("\n[SUCCESS] Both read and write operations inside the helper function were captured!")
     else:
         print("\n[FAIL] Missing expected log entries.")
         exit(1)
