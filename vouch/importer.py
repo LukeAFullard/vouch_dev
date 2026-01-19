@@ -81,16 +81,13 @@ def auto_audit(targets=None):
     original_modules = {}
 
     if "*" in targets:
-        # If wildcard, we can't iterate "targets" to wrap existing modules.
-        # We'd have to scan sys.modules, which is risky.
-        # For now, we only audit *new* imports for wildcard,
-        # OR we try to audit explicitly listed targets + wildcard for everything else?
-        # User behavior: if they say '*', they likely mean "everything from now on".
-        # But if they imported pandas before, they want it audited?
-        # Let's assume '*' only affects new imports to be safe,
-        # unless specific names are ALSO provided?
-        # targets=["*", "pandas"] -> wrap pandas now, and everything else later.
-        pass
+        # Scan sys.modules and wrap anything that passes the filter
+        for name in list(sys.modules.keys()):
+            if finder._should_audit(name):
+                mod = sys.modules[name]
+                if not isinstance(mod, Auditor):
+                    original_modules[name] = mod
+                    sys.modules[name] = Auditor(mod, name=name)
 
     # Wrap specifically listed targets if they are already loaded
     for name in targets:
