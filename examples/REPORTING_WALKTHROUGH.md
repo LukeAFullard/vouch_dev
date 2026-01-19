@@ -1,3 +1,20 @@
+# Example: Generating Audit Reports
+
+## Introduction
+
+Vouch not only records your analysis and captures artifacts but also allows you to generate human-readable reports from your audit packages. These reports are essential for sharing your work with stakeholders, compliance officers, or simply for your own documentation.
+
+You can generate reports in two formats:
+- **HTML**: Best for interactive viewing in a web browser.
+- **Markdown**: Best for integration into documentation sites, GitHub readmes, or text-based workflows.
+
+This example demonstrates how to run a secure Vouch session and then generate reports in both formats.
+
+## Code
+
+The following script (`generate_report_example.py`) sets up a complete Vouch workflow: generating keys, running a session with artifacts, and finally producing the reports.
+
+```python
 import os
 import sys
 import pandas as pd
@@ -79,3 +96,63 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+## Results
+
+Running the script produces the following output. The Markdown report preview shows the structured summary of the session, including the environment, captured artifacts, and the sequence of operations.
+
+```text
+--- Vouch Reporting Example ---
+
+1. Generating RSA keys (example_id_rsa, example_id_rsa.pub)...
+2. Running analysis session -> example_session.vch
+   [Action] Reading CSV file...
+   [Action] Calculating mean...
+   [Action] Bundling input file as artifact...
+
+3. Generating HTML report -> example_report.html
+4. Generating Markdown report -> example_report.md
+
+--- Markdown Report Preview ---
+
+# Vouch Audit Report
+**File:** `example_session.vch`
+
+## Session Summary
+- **Start Time:** 2026-01-19T01:43:39.706884+00:00
+- **End Time:** 2026-01-19T01:43:39.712313+00:00
+- **Total Operations:** 3
+
+## Environment
+- **Python Version:** `3.12.12 (main, Nov  7 2025, 00:07:10) [GCC 13.3.0]`
+- **Platform:** `linux`
+
+## Artifacts
+- **input_data.csv**: `e5f38e40ea2309b6dd95dc8c12c1b606b93a0a94128da5bca5ccef4ed1d7f44b`
+
+## Audit Log
+### 1. TraceSession.seed_enforcement
+- **Timestamp:** 2026-01-19T01:43:39.706884+00:00
+- **Args:** `['42']`
+- **Kwargs:** `{}`
+- **Result:** `None`
+
+### 2. pd.read_csv
+- **Timestamp:** 2026-01-19T01:43:39.710162+00:00
+- **Args:** `["'input_data.csv'"]`
+- **Kwargs:** `{}`
+- **Result:** `<DataFrame shape=(5, 2)>`
+
+### 3. calculate_mean
+- **Timestamp:** 2026-01-19T01:43:39.712313+00:00
+- **Args:** `['<DataFrame shape=(5, 2)>']`
+- **Kwargs:** `{}`
+- **Result:** `<float64 shape=()>`
+
+-------------------------------
+```
+
+## Conclusion
+
+Vouch's reporting capabilities bridge the gap between secure, forensic logging and human understanding. By providing both HTML and Markdown outputs, Vouch integrates seamlessly into both visual and automated documentation workflows.
