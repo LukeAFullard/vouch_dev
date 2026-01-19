@@ -51,80 +51,85 @@ class Auditor:
             return self._wrap_callable(attr, name)
 
         # Recursively wrap attributes that are part of the library (heuristic)
-        # Check if module starts with same prefix?
-        # For now, simplistic wrapping.
         return Auditor(attr, name=f"{self._name}.{name}")
+
+    def _hash_arguments(self, func_name, args, kwargs):
+        """Helper to hash file paths found in arguments."""
+        extra_hashes = {}
+        # Naive implementation: check arg[0] and specific kwargs
+        # This covers pandas.read_csv(filepath) and df.to_csv(filepath)
+
+        # Check first positional arg
+        if args and isinstance(args[0], str) and os.path.exists(args[0]):
+            try:
+                file_hash = Hasher.hash_file(args[0])
+                extra_hashes["arg_0_file_hash"] = file_hash
+                extra_hashes["arg_0_path"] = args[0]
+            except (IOError, OSError) as e:
+                logger.warning(f"Failed to hash file {args[0]}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error hashing {args[0]}: {e}")
+
+        # Check common kwargs for file paths
+        for key, val in kwargs.items():
+                if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and isinstance(val, str) and os.path.exists(val):
+                    try:
+                        file_hash = Hasher.hash_file(val)
+                        extra_hashes[f"kwarg_{key}_file_hash"] = file_hash
+                        extra_hashes[f"kwarg_{key}_path"] = val
+                    except (IOError, OSError) as e:
+                        logger.warning(f"Failed to hash file {val}: {e}")
+                    except Exception as e:
+                        logger.error(f"Unexpected error hashing {val}: {e}")
+        return extra_hashes
 
     def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Execute the actual function
+
+            # --- Pre-execution Hashing (Inputs) ---
+            # Capture inputs before execution (in case they change or are read)
+            # Typically for read_*, the file must exist before.
+            input_hashes = {}
+            if "read" in func_name or "load" in func_name:
+                 input_hashes = self._hash_arguments(func_name, args, kwargs)
+
+            # --- Execute ---
             result = func(*args, **kwargs)
+
+            # --- Post-execution Hashing (Outputs) ---
+            # Capture outputs after execution (file created)
+            # Typically for to_*, save_*, dump_*.
+            output_hashes = {}
+            if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+                 output_hashes = self._hash_arguments(func_name, args, kwargs)
+
+            # Combine hashes
+            extra_hashes = {**input_hashes, **output_hashes}
 
             # Log if a session is active
             session = TraceSession.get_active_session()
             if session:
                 full_name = f"{self._name}.{func_name}"
-
-                # Check for file I/O (naive implementation for read_*)
-                extra_hashes = {}
-                if "read" in func_name or "load" in func_name or "to_" in func_name:
-                    # Check first positional arg
-                    if args and isinstance(args[0], str) and os.path.exists(args[0]):
-                        try:
-                            file_hash = Hasher.hash_file(args[0])
-                            extra_hashes["arg_0_file_hash"] = file_hash
-                            extra_hashes["arg_0_path"] = args[0]
-                        except (IOError, OSError) as e:
-                            logger.warning(f"Failed to hash file {args[0]}: {e}")
-                        except Exception as e:
-                            logger.error(f"Unexpected error hashing {args[0]}: {e}")
-
-                    # Check common kwargs for file paths
-                    # specific to pandas.read_csv(filepath_or_buffer=...) or generic
-                    for key, val in kwargs.items():
-                         if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and isinstance(val, str) and os.path.exists(val):
-                             try:
-                                file_hash = Hasher.hash_file(val)
-                                extra_hashes[f"kwarg_{key}_file_hash"] = file_hash
-                                extra_hashes[f"kwarg_{key}_path"] = val
-                             except (IOError, OSError) as e:
-                                logger.warning(f"Failed to hash file {val}: {e}")
-                             except Exception as e:
-                                logger.error(f"Unexpected error hashing {val}: {e}")
-
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             # --- Deep Wrapping Logic ---
-            # If the result is an object from the same package as the wrapped target,
-            # we should wrap it too so subsequent calls (e.g. df.to_csv) are audited.
-
-            # Determine target package
             target_pkg = getattr(self._target, "__module__", "").split(".")[0]
             if not target_pkg and hasattr(self._target, "__package__"):
                  target_pkg = self._target.__package__
 
-            # If we can't determine package, maybe infer from self._name?
-            # e.g. "pandas.read_csv" -> "pandas"
             if not target_pkg and "." in self._name:
                 target_pkg = self._name.split(".")[0]
 
             if target_pkg and result is not None:
-                # Check if result belongs to same package
                 res_mod = getattr(type(result), "__module__", "")
                 if res_mod and res_mod.startswith(target_pkg):
-                    # Wrap it!
-                    # We assume it's a class instance (like DataFrame), so we wrap it.
-                    # We assume primitives (int, str) are NOT in the package module (they are builtins).
                     return Auditor(result, name=f"{full_name}()")
 
             return result
         return wrapper
 
     # --- Proxy Dunder Methods ---
-    # To allow wrapped objects (like DataFrames) to be used naturally (df['col'], len(df), etc.)
-    # we must proxy dunder methods.
-    # Since __getattr__ is not called for dunders, we must define them explicitly.
 
     def __getitem__(self, key):
         return self._target[key]
@@ -141,11 +146,7 @@ class Auditor:
     def __str__(self):
         return str(self._target)
 
-    # Arithmetic operators (forward to target)
-    # Note: If target doesn't support it, this raises TypeError, which is correct.
-    # We unwrap self for the operation to work if the other operand is raw?
-    # Or rely on python's dispatch.
-
+    # Arithmetic operators
     def __add__(self, other):
         return self._target + other
 
@@ -161,7 +162,7 @@ class Auditor:
     def __floordiv__(self, other):
         return self._target // other
 
-    # Reverse arithmetic (if other + self)
+    # Reverse arithmetic
     def __radd__(self, other):
         return other + self._target
 
