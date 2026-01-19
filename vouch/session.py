@@ -32,6 +32,7 @@ class TraceSession:
         seed: Optional[int] = None,
         private_key_path: Optional[str] = None,
         private_key_password: Optional[str] = None,
+        tsa_url: Optional[str] = None,
         capture_script: bool = True,
         auto_track_io: bool = False,
         max_artifact_size: int = 1024 * 1024 * 1024
@@ -45,6 +46,7 @@ class TraceSession:
             seed: Seed for random number generators (random, numpy).
             private_key_path: Path to the RSA private key for signing.
             private_key_password: Password for the private key.
+            tsa_url: URL of the RFC 3161 Timestamp Authority (TSA).
             capture_script: If True, captures the calling script as an artifact.
             auto_track_io: If True, hooks builtins.open to track all file reads.
             max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
@@ -56,6 +58,7 @@ class TraceSession:
         self.temp_dir: Optional[str] = None
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
+        self.tsa_url = tsa_url
         self.capture_script = capture_script
         self.auto_track_io = auto_track_io
         self.max_artifact_size = max_artifact_size
@@ -68,29 +71,36 @@ class TraceSession:
             raise RuntimeError("Nested TraceSessions are not supported.")
         TraceSession._active_session = self
 
-        # Setup temporary directory for artifacts
-        self.temp_dir = tempfile.mkdtemp()
+        try:
+            # Setup temporary directory for artifacts
+            self.temp_dir = tempfile.mkdtemp()
 
-        # Create data directory for captured files
-        os.makedirs(os.path.join(self.temp_dir, "data"))
+            # Create data directory for captured files
+            os.makedirs(os.path.join(self.temp_dir, "data"))
 
-        # Enforce seed
-        if self.seed is not None:
-            random.seed(self.seed)
-            try:
-                import numpy as np
-                np.random.seed(self.seed)
-            except ImportError:
-                pass
-            self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
+            # Enforce seed
+            if self.seed is not None:
+                random.seed(self.seed)
+                try:
+                    import numpy as np
+                    np.random.seed(self.seed)
+                except ImportError:
+                    pass
+                self.logger.log_call("TraceSession.seed_enforcement", [self.seed], {}, None)
 
-        self._check_rng_usage()
+            self._check_rng_usage()
 
-        if self.capture_script:
-            self._capture_calling_script()
+            if self.capture_script:
+                self._capture_calling_script()
 
-        if self.auto_track_io:
-            self._hook_open()
+            if self.auto_track_io:
+                self._hook_open()
+
+        except Exception:
+            TraceSession._active_session = None
+            if self.temp_dir and os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+            raise
 
         return self
 
@@ -112,6 +122,21 @@ class TraceSession:
 
             # 3. Process captured artifacts
             self._process_artifacts()
+
+            # 4. Request Timestamp (if configured)
+            if self.tsa_url:
+                try:
+                    from .timestamp import TimestampClient
+                    client = TimestampClient()
+                    tsr_data = client.request_timestamp(log_path, self.tsa_url)
+                    with open(os.path.join(self.temp_dir, "audit_log.tsr"), "wb") as f:
+                        f.write(tsr_data)
+                except Exception as e:
+                    msg = f"Timestamping failed: {e}"
+                    if self.strict:
+                        raise RuntimeError(msg) from e
+                    else:
+                        print(f"Warning: {msg}")
 
             # 4. Sign artifacts if private key is available
             if self.private_key_path and os.path.exists(self.private_key_path):
@@ -144,6 +169,10 @@ class TraceSession:
             if self.strict:
                 raise FileNotFoundError(f"Artifact not found: {filepath}")
             return
+
+        # Security check for symlinks
+        if os.path.islink(filepath):
+            raise ValueError(f"Symlinks are not allowed: {filepath}")
 
         if self.strict and os.path.getsize(filepath) > self.max_artifact_size:
             raise ValueError(f"Artifact exceeds maximum size ({self.max_artifact_size} bytes): {filepath}")
@@ -196,9 +225,15 @@ class TraceSession:
 
     def _check_rng_usage(self):
         if 'torch' in sys.modules:
-             logger.warning("PyTorch detected. Please ensure you manually seed it with torch.manual_seed(seed).")
+            msg = "PyTorch detected. Please ensure you manually seed it with torch.manual_seed(seed)."
+            if self.strict:
+                raise RuntimeError(msg)
+            logger.warning(msg)
         if 'tensorflow' in sys.modules:
-             logger.warning("TensorFlow detected. Please ensure you manually seed it with tf.random.set_seed(seed).")
+            msg = "TensorFlow detected. Please ensure you manually seed it with tf.random.set_seed(seed)."
+            if self.strict:
+                raise RuntimeError(msg)
+            logger.warning(msg)
 
     def _capture_calling_script(self):
         try:
@@ -269,6 +304,11 @@ class TraceSession:
                 sys.stdout.flush()
 
             dst_path = os.path.join(data_dir, name)
+
+            # Check if source is symlink (TOCTOU protection)
+            if os.path.islink(src_path):
+                print(f"Warning: Skipping artifact {name} (symlink detected)")
+                continue
 
             # Check file size
             try:

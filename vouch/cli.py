@@ -50,6 +50,21 @@ def verify(args):
             print(f"  [FAIL] Signature Verification: Invalid ({e})")
             sys.exit(1)
 
+        # Verify Timestamp (RFC 3161)
+        tsr_path = os.path.join(temp_dir, "audit_log.tsr")
+        if os.path.exists(tsr_path):
+            print("  [...] Verifying Timestamp...")
+            from .timestamp import TimestampClient
+            client = TimestampClient()
+            try:
+                # Basic verification of data match
+                if client.verify_timestamp(os.path.join(temp_dir, "audit_log.json"), tsr_path):
+                    print("    [OK] Timestamp Verified (Matches Log)")
+                else:
+                    print("    [FAIL] Timestamp Verification Failed")
+            except Exception as e:
+                print(f"    [FAIL] Timestamp Error: {e}")
+
         # Verify Log Chain
         try:
             with open(os.path.join(temp_dir, "audit_log.json"), "r") as f:
