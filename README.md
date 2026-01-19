@@ -71,6 +71,16 @@ See the [**Capture Artifacts Walkthrough**](examples/CAPTURE_WALKTHROUGH.md).
 python3 examples/capture_artifacts_example.py
 ```
 
+### Reproducing Results (Rerun)
+
+Since Vouch captures input data and environment details, you can extract these components to re-run the analysis and verify reproducibility.
+
+See the [**Rerun Verification Walkthrough**](examples/RERUN_WALKTHROUGH.md).
+
+```bash
+python3 examples/rerun_verification.py
+```
+
 ## Documentation
 
 *   [**Tutorial: Sending an Audit Package**](TUTORIAL.md) - A step-by-step guide for Analysts and Auditors.
