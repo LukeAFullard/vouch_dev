@@ -9,6 +9,7 @@ print("Starting Vouch Quickstart...")
 
 # Start the session.
 # 'vouch.start' automatically wraps pandas and handles the audit log.
+# We can use the simplified alias 'vouch.capture' or just 'vouch.start'
 with vouch.start("quickstart.vch"):
 
     # Create some dummy data
@@ -37,8 +38,12 @@ with vouch.start("quickstart.vch"):
     vouch.TraceSession.get_active_session().add_artifact("products.csv")
 
 print("\nSuccess! Audit package 'quickstart.vch' created.")
-print("You can now verify it with:")
-print("  vouch verify quickstart.vch")
+print("You can verify it programmatically:")
+
+if vouch.verify("quickstart.vch"):
+    print("  [OK] Verification Successful")
+else:
+    print("  [FAIL] Verification Failed")
 
 # Clean up the CSV file
 if os.path.exists("products.csv"):

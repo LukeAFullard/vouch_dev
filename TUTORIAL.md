@@ -19,24 +19,21 @@ vouch gen-keys --name alice_key
 ```
 
 ### 2. Wrap the Analysis
-Alice writes her analysis script (`analysis.py`), wrapping the critical libraries with Vouch.
+Alice writes her analysis script (`analysis.py`). She uses the simplified Vouch API to wrap her code.
 
 ```python
-from vouch import Auditor, TraceSession
+import vouch
 import pandas as pd
 import numpy as np
 
-# 1. Wrap libraries
-pandas = Auditor(pd)
-numpy = Auditor(np)
-
-# 2. Start a Secure Session
-# Alice uses her private key to sign the session automatically
-with TraceSession("water_quality_report.vch", private_key_path="alice_key"):
+# Alice uses her private key to sign the session automatically.
+# She can optionally specify a filename, or let Vouch generate one.
+with vouch.start(filename="water_quality_report.vch", private_key_path="alice_key"):
 
     # 3. Perform Analysis
-    # Vouch intercepts 'read_csv' and hashes 'raw_data.csv'
-    df = pandas.read_csv("raw_data.csv")
+    # Vouch automatically intercepts 'read_csv' and hashes 'raw_data.csv'
+    # (Default targets are pandas and numpy)
+    df = pd.read_csv("raw_data.csv")
 
     # Vouch logs this calculation
     mean_ph = df["ph"].mean()
@@ -63,10 +60,20 @@ Bob receives the files. He wants to know:
 *   What parameters did she use?
 
 ### 2. Verify Integrity
-Bob runs the verification tool.
+Bob runs the verification tool. He can use the CLI or a Python script.
 
+**CLI:**
 ```bash
 vouch verify water_quality_report.vch --data raw_data.csv
+```
+
+**Python:**
+```python
+import vouch
+if vouch.verify("water_quality_report.vch", data_file="raw_data.csv"):
+    print("Verified!")
+else:
+    print("Tampered!")
 ```
 
 **Outcome A: Success**
