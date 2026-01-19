@@ -33,7 +33,7 @@ class TestCryptoEncryption(unittest.TestCase):
         )
 
         # Try to load without password (should fail)
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
              # cryptography raises TypeError or ValueError if password is required but not provided or wrong type
              # Actually, serialization.load_pem_private_key raises TypeError if password is missing for encrypted key
              CryptoManager.load_private_key(self.priv_key_path, password=None)

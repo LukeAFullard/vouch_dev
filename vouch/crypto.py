@@ -48,11 +48,24 @@ class CryptoManager:
         if password and isinstance(password, str):
             password = password.encode('utf-8')
 
-        with open(path, "rb") as key_file:
-            return serialization.load_pem_private_key(
-                key_file.read(),
-                password=password,
-            )
+        try:
+            with open(path, "rb") as key_file:
+                return serialization.load_pem_private_key(
+                    key_file.read(),
+                    password=password,
+                )
+        except TypeError as e:
+            if "password was not given" in str(e).lower():
+                 raise ValueError("Private key is encrypted but no password was provided.") from e
+            raise RuntimeError(f"Failed to load private key: {e}") from e
+        except ValueError as e:
+            if "bad decrypt" in str(e).lower() or "password" in str(e).lower():
+                raise ValueError("Incorrect password for private key") from e
+            raise
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Private key file not found: {path}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load private key: {e}") from e
 
     @staticmethod
     def load_public_key(path):

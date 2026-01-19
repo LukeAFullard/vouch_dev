@@ -129,8 +129,16 @@ def verify(args):
 
                 data_dir = os.path.join(temp_dir, "data")
                 all_valid = True
+                total_artifacts = len(manifest)
+                processed = 0
 
                 for name, expected_hash in manifest.items():
+                    processed += 1
+                    # Progress indicator for large artifact sets (every 10 or 10%)
+                    if total_artifacts > 10 and (processed % 10 == 0 or processed == total_artifacts):
+                         sys.stdout.write(f"\r    Verifying artifacts... {processed}/{total_artifacts}")
+                         sys.stdout.flush()
+
                     # Sanitize path to prevent traversal
                     if os.path.isabs(name) or ".." in name:
                         print(f"    [FAIL] Malformed artifact path: {name}")
@@ -157,11 +165,14 @@ def verify(args):
 
                     actual_hash = Hasher.hash_file(artifact_path)
                     if actual_hash == expected_hash:
-                        print(f"    [OK] {name}")
+                        if total_artifacts <= 10:
+                            print(f"    [OK] {name}")
                     else:
+                        if total_artifacts > 10: print() # Newline if we were progress barring
                         print(f"    [FAIL] {name} (Hash Mismatch)")
                         all_valid = False
 
+                if total_artifacts > 10: print() # Clear progress line
                 if all_valid:
                     print("  [OK] Captured Artifacts Integrity: Valid")
                 else:
