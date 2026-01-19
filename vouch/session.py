@@ -6,6 +6,7 @@ import zipfile
 import tempfile
 import shutil
 import random
+import vouch
 from .logger import Logger
 from .crypto import CryptoManager
 from .hasher import Hasher
@@ -125,6 +126,7 @@ class TraceSession:
             freeze_output = "Error capturing pip freeze"
 
         env_info = {
+            "vouch_version": vouch.__version__,
             "python_version": sys.version,
             "platform": sys.platform,
             "pip_freeze": freeze_output
@@ -144,9 +146,14 @@ class TraceSession:
             dst_path = os.path.join(data_dir, name)
 
             # Double check destination is within data_dir
-            if not os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)]) == os.path.abspath(data_dir):
-                 print(f"Warning: Skipping artifact {name} (path traversal detected)")
-                 continue
+            try:
+                common = os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)])
+                if common != os.path.abspath(data_dir):
+                     print(f"Warning: Skipping artifact {name} (path traversal detected)")
+                     continue
+            except ValueError:
+                print(f"Warning: Skipping artifact {name} (invalid path or different drive)")
+                continue
 
             # Ensure parent directory exists
             os.makedirs(os.path.dirname(dst_path), exist_ok=True)
