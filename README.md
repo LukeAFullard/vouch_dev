@@ -16,10 +16,10 @@ Vouch wraps existing Python libraries (like Pandas and NumPy) to create a legall
 *   **Reproducibility:** Enforces random seeds (including strict checks for ML libraries) and captures exact environment dependency versions (`pip freeze`).
 *   **Artifact Bundling:** Securely bundles input/output files with the audit package (with symlink protection).
 *   **Reporting:** Generates human-readable HTML and Markdown reports from audit packages.
-*   **Verification CLI:** Strict validation of signatures, hash chains, and environment compatibility.
+*   **Verification:** Verify logs programmatically or via CLI (Strict validation of signatures, hash chains, and environment).
 *   **Diff Tool:** Compare two audit sessions to identify discrepancies in environment, logs, or artifacts.
 *   **Interactive Inspector:** Explore audit packages via a TUI without manual extraction.
-*   **Auto-Detection:** Automatically intercept and wrap `pandas` and `numpy` imports.
+*   **Auto-Detection:** Automatically intercept imports, supporting both explicit targets (`pandas`, `numpy`) and wildcard "audit everything" mode.
 
 ## Installation
 
@@ -33,31 +33,65 @@ See [QUICKSTART.md](QUICKSTART.md) for a detailed guide.
 
 ### 1. Write and Run
 
-Vouch requires **Zero Configuration** to get started. Just wrap your code with `vouch.start()`.
+Vouch requires **Zero Configuration** to get started. Just use `with vouch.vouch():` or the `@vouch.record` decorator.
 
+**Context Manager:**
 ```python
 import vouch
 import pandas as pd
 
-# Start an audit session (automatically generates temporary secure keys)
-with vouch.start("audit.vch"):
+# Automatically generates a timestamped audit file (e.g. audit_20231027_1000.vch)
+with vouch.vouch():
     df = pd.read_csv("data.csv")
     print(df.describe())
 ```
 
+**Decorator:**
+```python
+import vouch
+
+# Only decorate the entry point function
+@vouch.record
+def analyze():
+    import pandas as pd
+    df = pd.read_csv("data.csv")
+    return df.mean()
+
+analyze()
+```
+
 ### 2. Verify
 
-Verify the integrity of the package immediately.
+Verify the integrity of the package immediately using the Python API or CLI.
+
+```python
+import vouch
+# Returns True/False
+is_valid = vouch.verify("audit_20231027_1000.vch")
+```
 
 ```bash
-vouch verify audit.vch
+vouch verify audit_20231027_1000.vch
 ```
 
 ## Advanced Usage
 
+### Audit Everything (Wildcard)
+
+You can automatically audit **all** subsequently imported third-party libraries using the wildcard target. Vouch intelligently excludes standard library modules and testing tools.
+
+```python
+with vouch.start(targets=["*"]):
+    import polars as pl  # Automatically audited
+    import sklearn       # Automatically audited
+    ...
+```
+
+### Persistent Identity
+
 For production use, you should establish a persistent identity using `vouch gen-keys`.
 
-### 4. Generate Report
+### Generate Report
 
 Create a human-readable summary of the audit session.
 
@@ -65,7 +99,7 @@ Create a human-readable summary of the audit session.
 vouch report output.vch report.html --format html
 ```
 
-### 5. Compare Sessions (Diff)
+### Compare Sessions (Diff)
 
 Compare two audit packages to see what changed in the environment, code execution path, or artifacts.
 
@@ -73,7 +107,7 @@ Compare two audit packages to see what changed in the environment, code executio
 vouch diff session1.vch session2.vch --show-hashes
 ```
 
-### 6. Interactive Inspection
+### Interactive Inspection
 
 Explore the contents of a package interactively.
 
