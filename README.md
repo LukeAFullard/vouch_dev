@@ -12,8 +12,9 @@ Vouch wraps existing Python libraries (like Pandas and NumPy) to create a legall
 *   **Tamper-Evident Logging:** SHA-256 hash chaining of all function inputs, outputs, and accessed files.
 *   **Cryptographic Signing:** RSA-2048 signing of audit logs and artifact manifests for non-repudiation.
 *   **Encrypted Identities:** Optional password-based encryption for private keys (PKCS#8).
-*   **Reproducibility:** Enforces random seeds and captures exact environment dependency versions (`pip freeze`).
-*   **Artifact Bundling:** Securely bundles input/output files with the audit package.
+*   **Timestamping:** Support for RFC 3161 Trusted Timestamping to prove existence at a point in time.
+*   **Reproducibility:** Enforces random seeds (including strict checks for ML libraries) and captures exact environment dependency versions (`pip freeze`).
+*   **Artifact Bundling:** Securely bundles input/output files with the audit package (with symlink protection).
 *   **Reporting:** Generates human-readable HTML and Markdown reports from audit packages.
 *   **Verification CLI:** Strict validation of signatures, hash chains, and environment compatibility.
 *   **Diff Tool:** Compare two audit sessions to identify discrepancies in environment, logs, or artifacts.
@@ -43,10 +44,11 @@ You can manually wrap objects or use `auto_audit` to automatically capture impor
 ```python
 from vouch import TraceSession, auto_audit
 
-# Run session with encrypted key and enforced seed
+# Run session with encrypted key, timestamping, and enforced seed
 with TraceSession("output.vch",
                   private_key_path="my_identity",
                   private_key_password="super-secret",
+                  tsa_url="https://freetsa.org/tsr", # Optional RFC 3161 Timestamping
                   seed=42):
     with auto_audit():
         import pandas as pd
@@ -92,14 +94,29 @@ vouch inspect output.vch
 # (vouch) artifacts
 ```
 
-## ⚠️ Reproducibility Limitations
+## ⚠️ Strict Mode & Security
 
-Vouch enforces seeds for `random` and `numpy.random` only. If your analysis uses:
-- PyTorch: Add `torch.manual_seed(seed)`
-- TensorFlow: Add `tf.random.set_seed(seed)`
-- Other RNGs: Manually seed them inside your session
+### RNG Seeding
+Vouch enforces seeds for `random` and `numpy.random`.
+If **Strict Mode** (default) is enabled, Vouch will **raise an error** if it detects unseeded usage of:
+- `torch`
+- `tensorflow`
 
-The `secrets` module is intentionally NOT seeded (cryptographic use).
+You must manually seed them before use:
+```python
+torch.manual_seed(seed)
+tf.random.set_seed(seed)
+```
+
+### Symlink Protection
+For security, Vouch **rejects symbolic links** when adding artifacts (`TraceSession.add_artifact`). This prevents the accidental bundling of sensitive system files or recursive loops.
+
+### Timestamping
+To add legal weight to your audit trail, provide a `tsa_url` to `TraceSession`. This requests a cryptographically verifiable timestamp token (RFC 3161) from a Trusted Timestamp Authority (TSA).
+- **FreeTSA.org**: `https://freetsa.org/tsr`
+- **DigiCert**: `http://timestamp.digicert.com`
+
+The `vouch verify` command will automatically verify this timestamp if present.
 
 ## Examples
 
