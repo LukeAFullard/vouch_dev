@@ -133,7 +133,8 @@ class TraceSession:
 
         file_hash = Hasher.hash_file(filepath)
         # We use log_call to insert it into the chain
-        self.logger.log_call("track_file", [filepath], {}, None, extra_hashes={"file_hash": file_hash})
+        self.logger.log_call("track_file", [filepath], {}, None,
+            extra_hashes={"tracked_file_hash": file_hash, "tracked_path": filepath})
 
     def annotate(self, key, value):
         """

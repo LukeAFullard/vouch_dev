@@ -8,6 +8,8 @@ from io import StringIO
 from unittest.mock import patch
 from vouch.session import TraceSession
 from vouch.crypto import CryptoManager
+from vouch.cli import verify
+from argparse import Namespace
 
 class TestUsability(unittest.TestCase):
     def setUp(self):
@@ -72,7 +74,7 @@ class TestUsability(unittest.TestCase):
         # Capture stdout
         captured_output = StringIO()
         with patch("sys.stdout", captured_output):
-            with TraceSession(vch_file) as sess:
+            with TraceSession(vch_file, capture_script=False) as sess:
                 for path in artifacts:
                     sess.add_artifact(path)
             # Session exit triggers _package_artifacts -> _process_artifacts -> printing
@@ -81,6 +83,38 @@ class TestUsability(unittest.TestCase):
         # Should contain "Packaging artifacts..."
         self.assertIn("Packaging artifacts...", output)
         self.assertIn("15/15", output)
+
+    def test_auto_data_verification(self):
+        """Test the --auto-data verification flag"""
+        vch_file = os.path.join(self.test_dir, "auto_verify.vch")
+        data_file = os.path.join(self.test_dir, "external_data.csv")
+
+        with open(data_file, 'w') as f:
+            f.write("column1,column2\n1,2")
+
+        # Create a session that tracks this file
+        # Use private key to sign, as verify expects signatures
+        with TraceSession(vch_file, strict=True, private_key_path=self.priv_key, private_key_password="correct") as sess:
+            sess.track_file(data_file)
+
+        # Run verify with --auto-data
+        args = Namespace(
+            file=vch_file,
+            data=None,
+            auto_data=True,
+            auto_data_dir=self.test_dir
+        )
+
+        captured_output = StringIO()
+        with patch("sys.stdout", captured_output):
+            verify(args)
+
+        output = captured_output.getvalue()
+
+        # Should find valid
+        self.assertIn("Auto-verifying referenced files", output)
+        self.assertIn("[OK] Auto-Data Verification: Valid", output)
+        self.assertIn(f"[OK] {data_file}", output)
 
 if __name__ == "__main__":
     unittest.main()
