@@ -278,10 +278,37 @@ class TraceSession:
         except subprocess.CalledProcessError:
             freeze_output = "Error capturing pip freeze"
 
+        # Capture CPU info
+        import platform
+        cpu_info = {
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version()
+        }
+
+        # Capture BLAS/LAPACK info from numpy
+        blas_info = "N/A"
+        try:
+            import numpy
+            import io
+            import contextlib
+            f = io.StringIO()
+            with contextlib.redirect_stdout(f):
+                numpy.show_config()
+            blas_info = f.getvalue()
+        except ImportError:
+            blas_info = "NumPy not installed"
+        except Exception as e:
+            blas_info = f"Error capturing NumPy config: {e}"
+
         env_info = {
             "vouch_version": vouch.__version__,
             "python_version": sys.version,
             "platform": sys.platform,
+            "cpu_info": cpu_info,
+            "blas_info": blas_info,
             "pip_freeze": freeze_output
         }
 
