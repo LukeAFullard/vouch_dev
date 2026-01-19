@@ -306,6 +306,36 @@ def gen_keys(args):
     CryptoManager.generate_keys(private, public, password=args.password)
     print(f"Generated {private} and {public}")
 
+def init(args):
+    """Initialize Vouch configuration and keys."""
+    # Determine location: local .vouch or global ~/.vouch
+    if args.global_config:
+        config_dir = os.path.expanduser("~/.vouch")
+    else:
+        config_dir = os.path.join(os.getcwd(), ".vouch")
+
+    if not os.path.exists(config_dir):
+        os.makedirs(config_dir)
+        print(f"Created configuration directory: {config_dir}")
+    else:
+        print(f"Configuration directory exists: {config_dir}")
+
+    # Check for keys
+    priv_key_path = os.path.join(config_dir, "id_rsa")
+    pub_key_path = os.path.join(config_dir, "id_rsa.pub")
+
+    if os.path.exists(priv_key_path):
+        print(f"Keys already exist in {config_dir}")
+    else:
+        print(f"Generating new keys in {config_dir}...")
+        try:
+            CryptoManager.generate_keys(priv_key_path, pub_key_path, password=args.password)
+            print("Keys generated successfully.")
+            print("You are now ready to use Vouch!")
+        except Exception as e:
+            print(f"Error generating keys: {e}")
+            sys.exit(1)
+
 def report(args):
     print(f"Generating report for {args.file}...")
     try:
@@ -324,6 +354,11 @@ def inspect(args):
 def main():
     parser = argparse.ArgumentParser(description="Vouch: Forensic Audit Wrapper")
     subparsers = parser.add_subparsers(dest="command")
+
+    # init
+    init_parser = subparsers.add_parser("init", help="Initialize Vouch (generate keys and config)")
+    init_parser.add_argument("--global", dest="global_config", action="store_true", help="Initialize in user home directory (~/.vouch)")
+    init_parser.add_argument("--password", help="Password for private key encryption")
 
     # verify
     verify_parser = subparsers.add_parser("verify", help="Verify a .vch package")
@@ -361,6 +396,8 @@ def main():
 
     if args.command == "verify":
         verify(args)
+    elif args.command == "init":
+        init(args)
     elif args.command == "gen-keys":
         gen_keys(args)
     elif args.command == "report":

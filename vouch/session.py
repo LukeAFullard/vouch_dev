@@ -59,6 +59,19 @@ class TraceSession:
         self.seed = seed
         self.logger = Logger()
         self.temp_dir: Optional[str] = None
+
+        # Auto-detect private key if not provided
+        if private_key_path is None:
+            # Check local .vouch
+            local_key = os.path.join(os.getcwd(), ".vouch", "id_rsa")
+            # Check global .vouch
+            global_key = os.path.expanduser("~/.vouch/id_rsa")
+
+            if os.path.exists(local_key):
+                private_key_path = local_key
+            elif os.path.exists(global_key):
+                private_key_path = global_key
+
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password
         self.tsa_url = tsa_url
