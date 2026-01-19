@@ -16,6 +16,9 @@ Vouch wraps existing Python libraries (like Pandas and NumPy) to create a legall
 *   **Artifact Bundling:** Securely bundles input/output files with the audit package.
 *   **Reporting:** Generates human-readable HTML and Markdown reports from audit packages.
 *   **Verification CLI:** Strict validation of signatures, hash chains, and environment compatibility.
+*   **Diff Tool:** Compare two audit sessions to identify discrepancies in environment, logs, or artifacts.
+*   **Interactive Inspector:** Explore audit packages via a TUI without manual extraction.
+*   **Auto-Detection:** Automatically intercept and wrap `pandas` and `numpy` imports.
 
 ## Installation
 
@@ -35,22 +38,23 @@ vouch gen-keys --name my_identity --password "super-secret"
 
 ### 2. Wrap and Run
 
-```python
-from vouch import Auditor, TraceSession
-import pandas as pd
+You can manually wrap objects or use `auto_audit` to automatically capture imports.
 
-# Wrap libraries
-pandas = Auditor(pd)
+```python
+from vouch import TraceSession, auto_audit
 
 # Run session with encrypted key and enforced seed
 with TraceSession("output.vch",
                   private_key_path="my_identity",
                   private_key_password="super-secret",
                   seed=42):
-    # Vouch will hash 'data.csv' when read
-    df = pandas.read_csv("data.csv")
-    # Vouch logs this operation
-    print(df.describe())
+    with auto_audit():
+        import pandas as pd
+
+        # Vouch will hash 'data.csv' when read
+        df = pd.read_csv("data.csv")
+        # Vouch logs this operation
+        print(df.describe())
 ```
 
 ### 3. Verify
@@ -67,6 +71,25 @@ Create a human-readable summary of the audit session.
 
 ```bash
 vouch report output.vch report.html --format html
+```
+
+### 5. Compare Sessions (Diff)
+
+Compare two audit packages to see what changed in the environment, code execution path, or artifacts.
+
+```bash
+vouch diff session1.vch session2.vch --show-hashes
+```
+
+### 6. Interactive Inspection
+
+Explore the contents of a package interactively.
+
+```bash
+vouch inspect output.vch
+# (vouch) timeline
+# (vouch) show 1
+# (vouch) artifacts
 ```
 
 ## ⚠️ Reproducibility Limitations

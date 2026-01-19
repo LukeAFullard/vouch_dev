@@ -57,11 +57,12 @@ class TestAutoAudit(unittest.TestCase):
             with auto_audit():
                 import pandas as pd
                 # pd should be wrapped
-                # Call something simple
+                # Call a function (classes like DataFrame are not wrapped to preserve isinstance)
                 try:
-                    df = pd.DataFrame({"a": [1]})
+                    # pd.isna is a function
+                    res = pd.isna(1)
                 except Exception as e:
-                    self.fail(f"pd.DataFrame raised exception: {e}")
+                    self.fail(f"pd.isna raised exception: {e}")
 
         # Verify log
         with zipfile.ZipFile(self.vch_file, 'r') as z:
@@ -69,10 +70,10 @@ class TestAutoAudit(unittest.TestCase):
 
         found = False
         for entry in log:
-            if "DataFrame" in entry.get("target", ""):
+            if "isna" in entry.get("target", ""):
                 found = True
                 break
-        self.assertTrue(found, "pd.DataFrame call was not logged")
+        self.assertTrue(found, "pd.isna call was not logged")
 
 if __name__ == "__main__":
     unittest.main()

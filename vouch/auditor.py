@@ -30,7 +30,11 @@ class Auditor:
 
         attr = getattr(self._target, name)
 
-        # If it's a callable, wrap it
+        # If it's a class/type, do NOT wrap it to preserve isinstance checks
+        if isinstance(attr, type):
+            return attr
+
+        # If it's a callable (and not a class), wrap it
         if callable(attr):
             return self._wrap_callable(attr, name)
 
