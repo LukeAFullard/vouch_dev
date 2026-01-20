@@ -5,9 +5,13 @@ import os
 import urllib.request
 import urllib.error
 import random
+import datetime
 from typing import Optional
 
 from asn1crypto import tsp, algos, cms, x509
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
+from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from cryptography import x509 as crypto_x509
@@ -203,14 +207,19 @@ class TimestampClient:
                     return False
 
                 # 2. Prepare data for signature verification (DER of SignedAttrs with SET OF tag 0x31)
-                sa_der = signed_attrs.dump()
-                # Patch tag from [0] IMPLICIT SET OF (0xA0) to SET OF (0x31)
-                # This assumes standard DER structure where first byte is identifier
-                if sa_der and sa_der[0] == 0xA0:
-                     data_to_verify = b'\x31' + sa_der[1:]
-                else:
-                     # Fallback, maybe it was already SET OF?
-                     data_to_verify = sa_der
+                # Instead of manual byte patching, we reconstruct the CMSAttributes (SET OF Attribute)
+                # properly using asn1crypto types.
+
+                # signed_attrs is a cms.CMSAttributes object (SetOf Attribute), but usually context-specific [0]
+                # RFC 5652 says we verify the DER encoding of the SET OF structure.
+
+                # We can cast it to a standard SetOf type to get the correct tag (0x31)
+                class Attributes(cms.SetOf):
+                    _child_spec = cms.Attribute
+
+                # Re-encode as standard SetOf
+                attrs_structure = Attributes(signed_attrs)
+                data_to_verify = attrs_structure.dump()
 
             else:
                 data_to_verify = content_bytes
@@ -252,13 +261,76 @@ class TimestampClient:
             # 3. Verify Chain (CA File)
             # If CA file is provided, we should check if the signer cert is issued by it.
             if ca_file and os.path.exists(ca_file):
-                # Simple check: Is the issuer in the CA file?
-                # This is a very weak check (no path validation, revocation, etc.)
-                # But better than nothing for a standalone tool.
-                pass
+                try:
+                    self.verify_chain_of_trust(cert_obj, ca_file)
+                except Exception as e:
+                    logger.error(f"Chain verification failed: {e}")
+                    return False
 
             return True
 
         except Exception as e:
             logger.error(f"Timestamp verification error: {e}")
             return False
+
+    def verify_chain_of_trust(self, cert_obj, ca_file):
+        """
+        Verifies that the cert_obj is signed by a CA in ca_file.
+        Checks validity dates and signature.
+        """
+        # 1. Load CA certificates
+        with open(ca_file, "rb") as f:
+            ca_data = f.read()
+
+        ca_certs = crypto_x509.load_pem_x509_certificates(ca_data)
+        if not ca_certs:
+             raise ValueError("No certificates found in CA file")
+
+        # 2. Check Expiry of Signer Cert
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        # Convert asn1crypto cert to cryptography cert for easy handling
+        signer_cert = crypto_x509.load_der_x509_certificate(cert_obj.dump())
+
+        if now < signer_cert.not_valid_before_utc or now > signer_cert.not_valid_after_utc:
+            raise ValueError(f"Signer certificate expired or not yet valid (Valid: {signer_cert.not_valid_before_utc} to {signer_cert.not_valid_after_utc})")
+
+        # 3. Find Issuer
+        issuer = signer_cert.issuer
+        found_issuer = None
+
+        for ca in ca_certs:
+            if ca.subject == issuer:
+                found_issuer = ca
+                break
+
+        if not found_issuer:
+            raise ValueError(f"Issuer certificate not found in CA file. Issuer: {issuer}")
+
+        # 4. Verify Signature of Signer Cert using Issuer's Public Key
+        # Check CA expiry first
+        if now < found_issuer.not_valid_before_utc or now > found_issuer.not_valid_after_utc:
+             raise ValueError("Issuer certificate is expired")
+
+        issuer_public_key = found_issuer.public_key()
+
+        try:
+            # We need the tbs_certificate_bytes and signature to verify
+            # cryptography library handles this
+            issuer_public_key.verify(
+                signer_cert.signature,
+                signer_cert.tbs_certificate_bytes,
+                padding.PKCS1v15(), # Certificates usually use PKCS1v1.5
+                signer_cert.signature_hash_algorithm
+            )
+        except Exception as e:
+            # Try PSS if default failed (though uncommon for CA signing)
+            try:
+                 issuer_public_key.verify(
+                    signer_cert.signature,
+                    signer_cert.tbs_certificate_bytes,
+                    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+                    signer_cert.signature_hash_algorithm
+                )
+            except Exception:
+                 raise ValueError(f"Certificate signature verification failed: {e}")

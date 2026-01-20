@@ -2,6 +2,7 @@ import functools
 import os
 import logging
 import inspect
+import operator
 from typing import Any, Optional, Callable
 from .hasher import Hasher
 
@@ -354,21 +355,64 @@ class Auditor:
     def __str__(self):
         return str(self._target)
 
+    # In-place operators helper
+    def _apply_inplace(self, op, op_name, other):
+        other_val = self._unwrap(other)
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+
+        try:
+            res = op(self._target, other_val)
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None, error=e)
+            raise
+
+        # If it was in-place mutation (identity preserved)
+        if res is self._target:
+             if session:
+                 session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None)
+             return self
+
+        # If it returned a new object (immutable target or copy), return wrapped result
+        return self._wrap_result(res, f"{self._name} {op_name} {other}")
+
     # Arithmetic operators
     def __add__(self, other):
         return self._wrap_result(self._target + self._unwrap(other), f"{self._name} + {other}")
 
+    def __iadd__(self, other):
+        return self._apply_inplace(operator.iadd, "__iadd__", other)
+
     def __sub__(self, other):
         return self._wrap_result(self._target - self._unwrap(other), f"{self._name} - {other}")
+
+    def __isub__(self, other):
+        return self._apply_inplace(operator.isub, "__isub__", other)
 
     def __mul__(self, other):
         return self._wrap_result(self._target * self._unwrap(other), f"{self._name} * {other}")
 
+    def __imul__(self, other):
+        return self._apply_inplace(operator.imul, "__imul__", other)
+
     def __truediv__(self, other):
         return self._wrap_result(self._target / self._unwrap(other), f"{self._name} / {other}")
 
+    def __itruediv__(self, other):
+        return self._apply_inplace(operator.itruediv, "__itruediv__", other)
+
     def __floordiv__(self, other):
         return self._wrap_result(self._target // self._unwrap(other), f"{self._name} // {other}")
+
+    def __ifloordiv__(self, other):
+        return self._apply_inplace(operator.ifloordiv, "__ifloordiv__", other)
+
+    def __mod__(self, other):
+        return self._wrap_result(self._target % self._unwrap(other), f"{self._name} % {other}")
+
+    def __imod__(self, other):
+        return self._apply_inplace(operator.imod, "__imod__", other)
 
     # Reverse arithmetic
     def __radd__(self, other):
@@ -387,12 +431,18 @@ class Auditor:
     def __matmul__(self, other):
         return self._wrap_result(self._target @ self._unwrap(other), f"{self._name} @ {other}")
 
+    def __imatmul__(self, other):
+        return self._apply_inplace(operator.imatmul, "__imatmul__", other)
+
     def __rmatmul__(self, other):
         return self._wrap_result(self._unwrap(other) @ self._target, f"{other} @ {self._name}")
 
     # Power
     def __pow__(self, other):
         return self._wrap_result(self._target ** self._unwrap(other), f"{self._name} ** {other}")
+
+    def __ipow__(self, other):
+        return self._apply_inplace(operator.ipow, "__ipow__", other)
 
     def __rpow__(self, other):
         return self._wrap_result(self._unwrap(other) ** self._target, f"{other} ** {self._name}")
@@ -401,11 +451,17 @@ class Auditor:
     def __and__(self, other):
         return self._wrap_result(self._target & self._unwrap(other), f"{self._name} & {other}")
 
+    def __iand__(self, other):
+        return self._apply_inplace(operator.iand, "__iand__", other)
+
     def __rand__(self, other):
         return self._wrap_result(self._unwrap(other) & self._target, f"{other} & {self._name}")
 
     def __or__(self, other):
         return self._wrap_result(self._target | self._unwrap(other), f"{self._name} | {other}")
+
+    def __ior__(self, other):
+        return self._apply_inplace(operator.ior, "__ior__", other)
 
     def __ror__(self, other):
         return self._wrap_result(self._unwrap(other) | self._target, f"{other} | {self._name}")
@@ -413,8 +469,23 @@ class Auditor:
     def __xor__(self, other):
         return self._wrap_result(self._target ^ self._unwrap(other), f"{self._name} ^ {other}")
 
+    def __ixor__(self, other):
+        return self._apply_inplace(operator.ixor, "__ixor__", other)
+
     def __rxor__(self, other):
         return self._wrap_result(self._unwrap(other) ^ self._target, f"{other} ^ {self._name}")
+
+    def __lshift__(self, other):
+        return self._wrap_result(self._target << self._unwrap(other), f"{self._name} << {other}")
+
+    def __ilshift__(self, other):
+        return self._apply_inplace(operator.ilshift, "__ilshift__", other)
+
+    def __rshift__(self, other):
+        return self._wrap_result(self._target >> self._unwrap(other), f"{self._name} >> {other}")
+
+    def __irshift__(self, other):
+        return self._apply_inplace(operator.irshift, "__irshift__", other)
 
     def __invert__(self):
         return self._wrap_result(~self._target, f"~{self._name}")
