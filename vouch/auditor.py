@@ -199,8 +199,16 @@ class Auditor:
                 extra_hashes["arg_0_file_hash"] = file_hash
                 extra_hashes["arg_0_path"] = args[0]
             except (IOError, OSError) as e:
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+                if session and session.strict:
+                     raise
                 logger.warning(f"Failed to hash file {args[0]}: {e}")
             except Exception as e:
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+                if session and session.strict:
+                     raise
                 logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
         # Check common kwargs for file paths
@@ -211,8 +219,16 @@ class Auditor:
                         extra_hashes[f"kwarg_{key}_file_hash"] = file_hash
                         extra_hashes[f"kwarg_{key}_path"] = val
                     except (IOError, OSError) as e:
+                        from .session import TraceSession
+                        session = TraceSession.get_active_session()
+                        if session and session.strict:
+                            raise
                         logger.warning(f"Failed to hash file {val}: {e}")
                     except Exception as e:
+                        from .session import TraceSession
+                        session = TraceSession.get_active_session()
+                        if session and session.strict:
+                            raise
                         logger.error(f"Unexpected error hashing {val}: {e}")
         return extra_hashes
 
@@ -229,6 +245,10 @@ class Auditor:
                 if self._should_hash_inputs(func_name):
                      input_hashes = self._hash_arguments(func_name, args, kwargs)
             except Exception:
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+                if session and session.strict:
+                    raise
                 pass # Don't fail audit if hashing fails
 
             full_name = f"{self._name}.{func_name}"
@@ -251,6 +271,10 @@ class Auditor:
                 if self._should_hash_outputs(func_name):
                      output_hashes = self._hash_arguments(func_name, args, kwargs)
             except Exception:
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+                if session and session.strict:
+                    raise
                 pass
 
             # Combine hashes
