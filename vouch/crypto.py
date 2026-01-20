@@ -1,12 +1,11 @@
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding, utils
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.exceptions import InvalidSignature
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 import datetime
 import os
-import hashlib
 
 class CryptoManager:
     """
@@ -149,19 +148,16 @@ class CryptoManager:
         Signs the content of a file using the private key.
         Returns the signature bytes.
         """
-        sha256 = hashlib.sha256()
         with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        digest = sha256.digest()
+            data = f.read()
 
         signature = private_key.sign(
-            digest,
+            data,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
             ),
-            utils.Prehashed(hashes.SHA256())
+            hashes.SHA256()
         )
         return signature
 
@@ -171,18 +167,15 @@ class CryptoManager:
         Verifies the signature of a file.
         Raises InvalidSignature if invalid.
         """
-        sha256 = hashlib.sha256()
         with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        digest = sha256.digest()
+            data = f.read()
 
         public_key.verify(
             signature,
-            digest,
+            data,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
             ),
-            utils.Prehashed(hashes.SHA256())
+            hashes.SHA256()
         )

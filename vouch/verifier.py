@@ -5,7 +5,6 @@ import tempfile
 import json
 import logging
 import shutil
-import ijson
 from typing import Optional, List, Dict, Any, Callable
 
 from .crypto import CryptoManager
@@ -219,28 +218,27 @@ class Verifier:
     def _verify_log_chain(self) -> bool:
         self._print("  [...] Verifying log chain integrity...")
         try:
-            log_path = os.path.join(self.temp_dir, "audit_log.json")
+            with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
+                log_data = json.load(f)
 
             prev_hash = "0" * 64
             expected_seq = 1
 
-            with open(log_path, "rb") as f: # ijson needs binary or file-like
-                # use_float=True ensures we get floats instead of Decimal, compatible with Hasher
-                for i, entry in enumerate(ijson.items(f, 'item', use_float=True)):
-                    if "sequence_number" in entry:
-                        if entry["sequence_number"] != expected_seq:
-                            self._fail("log_chain", f"Entry {i}: Sequence mismatch (expected {expected_seq}, got {entry['sequence_number']})")
-                            self._print("  [FAIL] Log Chain Integrity: Broken")
-                            return False
-                        expected_seq += 1
+            for i, entry in enumerate(log_data):
+                if "sequence_number" in entry:
+                    if entry["sequence_number"] != expected_seq:
+                        self._fail("log_chain", f"Entry {i}: Sequence mismatch (expected {expected_seq}, got {entry['sequence_number']})")
+                        self._print("  [FAIL] Log Chain Integrity: Broken")
+                        return False
+                    expected_seq += 1
 
-                    if "previous_entry_hash" in entry:
-                        if entry["previous_entry_hash"] != prev_hash:
-                            self._fail("log_chain", f"Entry {i}: Previous hash mismatch")
-                            self._print("  [FAIL] Log Chain Integrity: Broken")
-                            return False
+                if "previous_entry_hash" in entry:
+                    if entry["previous_entry_hash"] != prev_hash:
+                        self._fail("log_chain", f"Entry {i}: Previous hash mismatch")
+                        self._print("  [FAIL] Log Chain Integrity: Broken")
+                        return False
 
-                    prev_hash = Hasher.hash_object(entry)
+                prev_hash = Hasher.hash_object(entry)
 
             self._pass("log_chain", "Log Chain Integrity: Valid")
             return True
@@ -396,19 +394,17 @@ class Verifier:
         self._print(f"  [...] Verifying external data file: {data_file}")
         self._print(f"        Hash: {data_hash}")
 
-        # Scan log for hash using ijson for memory efficiency
+        with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
+            log = json.load(f)
+
         found = False
-        try:
-            with open(os.path.join(self.temp_dir, "audit_log.json"), "rb") as f:
-                for entry in ijson.items(f, 'item', use_float=True):
-                    if "extra_hashes" in entry:
-                        for val in entry["extra_hashes"].values():
-                            if val == data_hash:
-                                found = True
-                                break
-                    if found: break
-        except Exception as e:
-             self._warn(f"Log parsing interrupted during external data check: {e}")
+        for entry in log:
+            if "extra_hashes" in entry:
+                for val in entry["extra_hashes"].values():
+                    if val == data_hash:
+                        found = True
+                        break
+            if found: break
 
         if found:
             self._pass("external_data", "Data Integrity: Valid")
@@ -418,20 +414,18 @@ class Verifier:
             return False
 
     def _verify_auto_data(self, auto_data_dir: str) -> bool:
-        # Use ijson for memory efficiency
+        with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
+            log = json.load(f)
+
         referenced_files = {}
-        try:
-             with open(os.path.join(self.temp_dir, "audit_log.json"), "rb") as f:
-                for entry in ijson.items(f, 'item', use_float=True):
-                    if "extra_hashes" in entry:
-                        extras = entry["extra_hashes"]
-                        for key, path in extras.items():
-                            if key.endswith("_path") and isinstance(path, str):
-                                hash_key = key.replace("_path", "_file_hash")
-                                if hash_key in extras:
-                                    referenced_files[path] = extras[hash_key]
-        except Exception as e:
-             self._warn(f"Log parsing interrupted during auto-data scan: {e}")
+        for entry in log:
+            if "extra_hashes" in entry:
+                extras = entry["extra_hashes"]
+                for key, path in extras.items():
+                    if key.endswith("_path") and isinstance(path, str):
+                        hash_key = key.replace("_path", "_file_hash")
+                        if hash_key in extras:
+                            referenced_files[path] = extras[hash_key]
 
         if not referenced_files:
             self._print("    No external file references found in log.")
