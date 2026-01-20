@@ -203,14 +203,19 @@ class TimestampClient:
                     return False
 
                 # 2. Prepare data for signature verification (DER of SignedAttrs with SET OF tag 0x31)
-                sa_der = signed_attrs.dump()
-                # Patch tag from [0] IMPLICIT SET OF (0xA0) to SET OF (0x31)
-                # This assumes standard DER structure where first byte is identifier
-                if sa_der and sa_der[0] == 0xA0:
-                     data_to_verify = b'\x31' + sa_der[1:]
-                else:
-                     # Fallback, maybe it was already SET OF?
-                     data_to_verify = sa_der
+                # Instead of manual byte patching, we reconstruct the CMSAttributes (SET OF Attribute)
+                # properly using asn1crypto types.
+
+                # signed_attrs is a cms.CMSAttributes object (SetOf Attribute), but usually context-specific [0]
+                # RFC 5652 says we verify the DER encoding of the SET OF structure.
+
+                # We can cast it to a standard SetOf type to get the correct tag (0x31)
+                class Attributes(cms.SetOf):
+                    _child_spec = cms.Attribute
+
+                # Re-encode as standard SetOf
+                attrs_structure = Attributes(signed_attrs)
+                data_to_verify = attrs_structure.dump()
 
             else:
                 data_to_verify = content_bytes

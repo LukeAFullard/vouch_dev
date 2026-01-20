@@ -72,6 +72,14 @@ class Hasher:
             s = str(obj)
             # Check for memory addresses in default repr (e.g., <object at 0x7f...>)
             if " at 0x" in s and ">" in s:
+                 # Try to use __dict__ (state) instead of identity
+                 if hasattr(obj, "__dict__"):
+                     try:
+                         # Recursively hash the dict
+                         return Hasher.hash_object(obj.__dict__)
+                     except Exception:
+                         pass # Fallback to warning
+
                  logger.warning(f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher.")
 
             hasher = hashlib.sha256()
