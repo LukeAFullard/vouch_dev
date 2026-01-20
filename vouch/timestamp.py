@@ -54,19 +54,28 @@ class TimestampClient:
         try:
              with urllib.request.urlopen(req_obj) as response:
                   if response.status != 200:
-                       raise RuntimeError(f"Timestamp server returned status {response.status}")
+                       raise RuntimeError(f"Timestamp server returned HTTP status {response.status}")
                   tsr_data = response.read()
+        except urllib.error.HTTPError as e:
+             raise RuntimeError(f"Timestamp server error: {e.code} {e.reason}")
         except urllib.error.URLError as e:
-             raise RuntimeError(f"Failed to contact timestamp server: {e}")
+             raise RuntimeError(f"Failed to contact timestamp server ({url}): {e.reason}")
+        except Exception as e:
+             raise RuntimeError(f"Unexpected error contacting timestamp server: {e}")
 
         # Basic validation that we got a response
         try:
             resp = tsp.TimeStampResp.load(tsr_data)
-            status = resp['status']['status'].native
+            status_info = resp['status']
+            status = status_info['status'].native
+
             if status != 'granted' and status != 'granted_with_mods':
-                raise RuntimeError(f"Timestamp request failed: {status}")
+                fail_info = status_info['fail_info'].native if 'fail_info' in status_info else "Unknown"
+                status_string = status_info['status_string'].native if 'status_string' in status_info else ""
+                raise RuntimeError(f"Timestamp request denied by server. Status: {status}. Info: {fail_info}. Message: {status_string}")
         except Exception as e:
-            raise RuntimeError(f"Invalid timestamp response: {e}")
+            if isinstance(e, RuntimeError): raise
+            raise RuntimeError(f"Invalid timestamp response structure: {e}")
 
         return tsr_data
 
@@ -116,7 +125,7 @@ class TimestampClient:
             actual_hash = sha256.digest()
 
             if stored_hash != actual_hash:
-                logger.error("Timestamp hash mismatch")
+                logger.error(f"Timestamp hash mismatch. Token has {stored_hash.hex()}, file has {actual_hash.hex()}")
                 return False
 
             # 2. Verify Signature
@@ -203,7 +212,7 @@ class TimestampClient:
                     return False
 
                 if found_digest != calculated_digest:
-                    logger.error("Signed Attribute MessageDigest mismatch (Signature Grafting detected)")
+                    logger.error(f"Signed Attribute MessageDigest mismatch (Signature Grafting detected). Attr: {found_digest.hex()}, Calc: {calculated_digest.hex()}")
                     return False
 
                 # 2. Prepare data for signature verification (DER of SignedAttrs with SET OF tag 0x31)

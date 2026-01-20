@@ -27,7 +27,7 @@ class Hasher:
         return sha256.hexdigest()
 
     @staticmethod
-    def hash_object(obj: Any) -> str:
+    def hash_object(obj: Any, raise_error: bool = False) -> str:
         """Determine a deterministic hash for a Python object."""
         try:
             # 0. Check custom registry
@@ -76,15 +76,20 @@ class Hasher:
                  if hasattr(obj, "__dict__"):
                      try:
                          # Recursively hash the dict
-                         return Hasher.hash_object(obj.__dict__)
+                         return Hasher.hash_object(obj.__dict__, raise_error=raise_error)
                      except Exception:
                          pass # Fallback to warning
 
-                 logger.warning(f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher.")
+                 msg = f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher."
+                 if raise_error:
+                     raise ValueError(msg)
+                 logger.warning(msg)
 
             hasher = hashlib.sha256()
             hasher.update(s.encode('utf-8'))
             return hasher.hexdigest()
         except Exception as e:
+            if isinstance(e, ValueError) and raise_error:
+                raise
             logger.warning(f"Hashing failed for object type {type(obj)}: {e}")
             return "HASH_FAILED"

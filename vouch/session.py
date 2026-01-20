@@ -1,5 +1,6 @@
 import os
 import sys
+import errno
 import subprocess
 import json
 import uuid
@@ -74,7 +75,7 @@ class TraceSession:
         self.capture_git = capture_git
         self.custom_input_triggers = custom_input_triggers or []
         self.custom_output_triggers = custom_output_triggers or []
-        self.logger = Logger(light_mode=light_mode)
+        self.logger = Logger(light_mode=light_mode, strict=strict)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
 
@@ -418,19 +419,6 @@ class TraceSession:
         data_dir = os.path.join(self.temp_dir, "data")
         dst_path = os.path.join(data_dir, name)
 
-        # Check if source is symlink (TOCTOU protection)
-        if os.path.islink(src_path):
-            print(f"Warning: Skipping artifact {name} (symlink detected)")
-            return None
-
-        # Check file size
-        try:
-            if os.path.getsize(src_path) > self.max_artifact_size:
-                print(f"Warning: Skipping artifact {name} (exceeds max size)")
-                return None
-        except OSError:
-             return None # Will fail copy later or handled elsewhere
-
         # Double check destination is within data_dir
         try:
             common = os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)])
@@ -441,11 +429,49 @@ class TraceSession:
             print(f"Warning: Skipping artifact {name} (invalid path or different drive)")
             return None
 
-        # Ensure parent directory exists
-        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+        src_fd = None
+        try:
+            # Open with O_NOFOLLOW to fail if it's a symlink
+            # This prevents TOCTOU attacks where the file is replaced with a symlink
+            # after os.path.islink() check but before open()
+            src_fd = os.open(src_path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError as e:
+            if e.errno == errno.ELOOP: # It's a symlink
+                 print(f"Warning: Skipping artifact {name} (symlink detected)")
+                 return None
+            print(f"Warning: Skipping artifact {name} (access error: {e})")
+            return None
 
-        shutil.copy2(src_path, dst_path)
-        return dst_path
+        try:
+            # Check file size using the file descriptor
+            stat = os.fstat(src_fd)
+            if stat.st_size > self.max_artifact_size:
+                print(f"Warning: Skipping artifact {name} (exceeds max size)")
+                return None
+
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
+            # Copy content from FD
+            with os.fdopen(src_fd, 'rb') as fsrc:
+                src_fd = None # os.fdopen takes ownership
+                with open(dst_path, 'wb') as fdst:
+                    shutil.copyfileobj(fsrc, fdst)
+
+            # Attempt to copy metadata from the stat object
+            try:
+                os.chmod(dst_path, stat.st_mode)
+                os.utime(dst_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            except Exception:
+                pass
+
+            return dst_path
+        except Exception as e:
+             print(f"Warning: Failed to copy artifact {name}: {e}")
+             return None
+        finally:
+            if src_fd is not None:
+                os.close(src_fd)
 
     def _process_artifacts(self):
         """

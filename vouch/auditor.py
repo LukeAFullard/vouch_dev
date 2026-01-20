@@ -168,7 +168,13 @@ class Auditor:
             else:
                  full_name = f"{self._name}"
 
-            session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
+            if inspect.iscoroutine(result):
+                log_result = "<coroutine>"
+            elif inspect.isgenerator(result):
+                log_result = "<generator>"
+            else:
+                log_result = result
+            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
 
         # Handle Async Coroutines
         if inspect.iscoroutine(result):
@@ -250,18 +256,22 @@ class Auditor:
             # Combine hashes
             extra_hashes = {**input_hashes, **output_hashes}
 
-            # Log success
-            if session:
-                session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
-
             # --- Deep Wrapping Logic ---
             # Handle Async Coroutines
             if inspect.iscoroutine(result):
+                if session:
+                    session.logger.log_call(full_name, args, kwargs, "<coroutine>", extra_hashes)
                 return self._wrap_coroutine(result, full_name, args, kwargs)
 
             # Handle Generators
             if inspect.isgenerator(result):
+                if session:
+                    session.logger.log_call(full_name, args, kwargs, "<generator>", extra_hashes)
                 return self._wrap_generator(result, full_name, args, kwargs)
+
+            # Log success
+            if session:
+                session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
             return self._wrap_result(result, name_hint=f"{full_name}()")
 
