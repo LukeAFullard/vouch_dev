@@ -21,6 +21,7 @@ from .logger import Logger
 logger = logging.getLogger(__name__)
 from .crypto import CryptoManager
 from .hasher import Hasher
+from .git_tools import GitTracker
 from cryptography.hazmat.primitives import serialization
 
 class TraceSession:
@@ -40,7 +41,8 @@ class TraceSession:
         capture_script: bool = True,
         auto_track_io: bool = False,
         max_artifact_size: int = 1024 * 1024 * 1024,
-        light_mode: bool = False
+        light_mode: bool = False,
+        capture_git: bool = True
     ):
         """
         Initialize the TraceSession.
@@ -56,11 +58,13 @@ class TraceSession:
             auto_track_io: If True, hooks builtins.open to track all file reads.
             max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
             light_mode: If True, skips hashing of function arguments and results to improve performance.
+            capture_git: If True, captures git metadata (default: True).
         """
         self.filename = filename
         self.strict = strict
         self.seed = seed
         self.light_mode = light_mode
+        self.capture_git = capture_git
         self.logger = Logger(light_mode=light_mode)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
@@ -149,6 +153,9 @@ class TraceSession:
 
             if self.auto_track_io:
                 self._hook_open()
+
+            if self.capture_git:
+                self._capture_git_metadata()
 
         except Exception:
             TraceSession._active_session.reset(self._token)
@@ -302,6 +309,12 @@ class TraceSession:
                      self.add_artifact(script_path, arcname=f"__script__{os.path.basename(script_path)}")
         except Exception as e:
             logger.warning(f"Failed to capture calling script: {e}")
+
+    def _capture_git_metadata(self):
+        metadata = GitTracker.get_metadata()
+        if metadata:
+            with open(os.path.join(self.temp_dir, "git_metadata.json"), "w") as f:
+                json.dump(metadata, f, indent=2)
 
     def _hook_open(self):
         self._original_open = builtins.open

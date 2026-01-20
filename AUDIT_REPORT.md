@@ -17,6 +17,10 @@ During the audit, two significant issues were identified and fixed:
     *   **Issue**: The `Hasher` class relied on `str(obj)` for hashing dictionaries. Since Python dictionaries (before 3.7) or certain implementations do not guarantee order in string representation (or if constructed differently), this led to unstable hashes.
     *   **Fix**: Implemented deterministic dictionary hashing by sorting keys before hashing.
 
+3.  **Missing Git Tracking**:
+    *   **Issue**: The memory context indicated that Git metadata capture was a feature, but the `GitTracker` class and its integration were missing from the codebase.
+    *   **Fix**: Implemented `vouch/git_tools.py` and integrated it into `TraceSession` and `Verifier`. Vouch now captures commit SHA, branch, dirty status, and diffs (if dirty) by default (`capture_git=True`).
+
 ### Improvements: Light Mode
 
 To address performance concerns in high-frequency workflows, a new **`light_mode`** has been implemented.
@@ -52,10 +56,14 @@ To address import fragility and hashing robustness, further mitigations were add
 
 ### Weaknesses & Limitations
 
-*   **Performance Overhead**: The `Auditor` proxy wraps every attribute access and function call. For high-frequency operations or tight loops, this introduces significant runtime overhead. **Mitigation**: Use `light_mode=True` to skip expensive object hashing.
+*   **Performance Overhead**: The `Auditor` proxy wraps every attribute access and function call. For high-frequency operations or tight loops, this introduces significant runtime overhead.
+    *   **Status: MITIGATED**. Use `light_mode=True` to skip expensive object hashing in performance-critical sections.
 *   **Import System Fragility**: The reliance on `sys.meta_path` and retroactive patching of `sys.modules` is powerful but aggressive. It may conflict with other tools that manipulate the import system or with complex circular dependencies.
+    *   **Status: MITIGATED**. The new `excludes` parameter allows users to bypass auditing for known incompatible modules.
 *   **Hashing Robustness**: While `pandas` and `numpy` are handled well, other complex objects fall back to string representation hashing. If `__repr__` includes memory addresses or non-deterministic data, verification will fail.
+    *   **Status: FIXED**. Deterministic hashing for dictionaries has been implemented. For other objects, the `Hasher` now supports a registry and `__vouch_hash__` protocol for custom implementation.
 *   **Concurrency**: While `TraceSession` uses `contextvars` for thread safety, the `Auditor` modifies global state (`sys.modules`). This makes `auto_audit` potentially unsafe if multiple threads attempt to configure different audit targets simultaneously.
+    *   **Status: FIXED**. `auto_audit` now uses thread locks to ensure atomic patching of the import system.
 
 ## Recommendations
 

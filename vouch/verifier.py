@@ -78,6 +78,8 @@ class Verifier:
 
             self._verify_environment()
 
+            self._verify_git_metadata()
+
             if not self._verify_artifacts():
                 return False
 
@@ -249,6 +251,25 @@ class Verifier:
                 self._pass("environment", f"Environment: Python version matches ({current_version})")
         except Exception as e:
             self._warn(f"Could not verify environment: {e}")
+
+    def _verify_git_metadata(self):
+        git_path = os.path.join(self.temp_dir, "git_metadata.json")
+        if not os.path.exists(git_path):
+            return
+
+        try:
+            with open(git_path, "r") as f:
+                data = json.load(f)
+
+            sha = data.get("commit_sha", "Unknown")
+            is_dirty = data.get("is_dirty", False)
+
+            if is_dirty:
+                self._warn(f"Git Repository was DIRTY at capture time (Commit: {sha})")
+            else:
+                self._pass("git", f"Git Metadata: Clean commit {sha}")
+        except Exception as e:
+            self._warn(f"Could not parse git metadata: {e}")
 
     def _verify_artifacts(self) -> bool:
         artifacts_json_path = os.path.join(self.temp_dir, "artifacts.json")
