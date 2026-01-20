@@ -4,64 +4,76 @@ import os
 import signal
 import json
 import shutil
-import vouch
-from vouch.session import TraceSession
+import tempfile
+import sys
+from unittest.mock import patch
+
+# We need to run the worker in a way that we can control the temp dir.
+# Since multiprocessing makes patching hard, we'll use a fixed temp base.
+
+FIXED_TEMP_DIR = os.path.abspath("crash_test_temp_dir")
 
 def crashing_worker(filename):
-    """
-    A worker that initializes a session, does some work, and then is killed.
-    """
-    # Create a session
-    # Note: We can't use 'with' block easily because we want to kill it
-    # BEFORE exit.
+    if os.path.exists(FIXED_TEMP_DIR):
+        shutil.rmtree(FIXED_TEMP_DIR)
+    os.makedirs(FIXED_TEMP_DIR)
+
+    # Monkeypatch tempfile.mkdtemp to return our dir
+    # We can't easily monkeypatch across process boundary unless we do it inside.
+
+    import vouch.session
+    vouch.session.tempfile.mkdtemp = lambda: FIXED_TEMP_DIR
+
+    from vouch.session import TraceSession
 
     session = TraceSession(filename, strict=False)
     session.__enter__()
 
-    # Log some stuff
+    # Log entries
     session.logger.log_call("step1", [], {}, "result1")
     session.logger.log_call("step2", [], {}, "result2")
 
-    # Save partial log?
-    # Vouch currently only saves on __exit__.
-    # So if we crash here, we expect NO log file or an empty one.
-
-    print("Worker running...")
-    time.sleep(10) # Wait to be killed
-
-    session.__exit__(None, None, None)
+    # Force flush is handled by logger now
+    print("Worker logged steps.")
+    time.sleep(10) # Wait for kill
 
 def test_crash_consistency():
     filename = "crash_test.vch"
-    temp_dir = "crash_test_temp" # Vouch uses mkdtemp, so we might not find it easily unless we spy on it.
-
-    # But wait, TraceSession creates a temp dir. If the process dies,
-    # the temp dir remains (OS doesn't clean /tmp immediately).
-    # But the `audit_log.json` is only written in `__exit__`.
-
-    # HYPOTHESIS: If Vouch crashes, the audit log is LOST completely because it's in memory.
+    if os.path.exists(FIXED_TEMP_DIR):
+        shutil.rmtree(FIXED_TEMP_DIR)
 
     p = multiprocessing.Process(target=crashing_worker, args=(filename,))
     p.start()
 
-    time.sleep(2) # Let it initialize
+    time.sleep(2) # Wait for init and logging
 
-    # KILL IT
     print("Killing worker...")
     os.kill(p.pid, signal.SIGKILL)
     p.join()
 
-    # Check artifacts
-    if os.path.exists(filename):
-        print(f"FAIL: {filename} exists. It shouldn't if we crashed before exit?")
-        # If it exists, maybe it's valid?
+    # Now check if data exists in FIXED_TEMP_DIR/audit_log.json
+    log_path = os.path.join(FIXED_TEMP_DIR, "audit_log.json")
+
+    if os.path.exists(log_path):
+        with open(log_path, "r") as f:
+            # It might be an incomplete JSON array (trailing comma)
+            content = f.read()
+            print(f"Log content length: {len(content)}")
+
+            # Streaming logger writes "[\n", then objects.
+            # It closes with "]" only on close().
+            # So we expect it to be invalid JSON, but contain the data.
+
+            if '"step1"' in content and '"step2"' in content:
+                print("PASS: Data recovered from crash!")
+            else:
+                print("FAIL: Log file exists but data missing.")
     else:
-        print(f"PASS: {filename} does not exist. (Data Loss Expected for now)")
+        print("FAIL: Log file not found.")
 
-    # Is this a "weakness"? Yes. For evidence, if the power plug is pulled,
-    # you lose the session. A "Production Ready" forensic tool usually writes to disk incrementally.
-
-    # Let's verify this hypothesis.
+    # Cleanup
+    if os.path.exists(FIXED_TEMP_DIR):
+        shutil.rmtree(FIXED_TEMP_DIR)
 
 if __name__ == "__main__":
     test_crash_consistency()

@@ -5,6 +5,7 @@ import time
 import shutil
 import pytest
 import vouch
+import json
 from vouch.session import TraceSession
 from vouch.auditor import Auditor
 
@@ -18,11 +19,9 @@ def test_race_open():
             with open(f, "w") as fh:
                 fh.write("test")
 
-        # We need to capture the session object to inspect logs later
         session = TraceSession(filename, auto_track_io=True, strict=False)
 
         def worker(idx):
-            # Sleep a tiny bit to randomize start
             time.sleep(0.001 * (idx % 10))
             with open(files[idx], "r") as f:
                 f.read()
@@ -37,13 +36,19 @@ def test_race_open():
             for t in threads:
                 t.join()
 
-            # Now verify logs
-            track_file_count = 0
-            for entry in session.logger.log:
-                if entry["target"] == "track_file":
-                    track_file_count += 1
+        # Verify logs from disk (streaming mode clears memory)
+        # Session creates a zip file on exit. We can check that.
+        import zipfile
+        with zipfile.ZipFile(filename, 'r') as z:
+            with z.open("audit_log.json") as f:
+                log_data = json.load(f)
 
-            assert track_file_count == 100, f"Expected 100 tracked files, got {track_file_count}"
+        track_file_count = 0
+        for entry in log_data:
+            if entry["target"] == "track_file":
+                track_file_count += 1
+
+        assert track_file_count == 100, f"Expected 100 tracked files, got {track_file_count}"
 
     finally:
         # Cleanup
@@ -70,11 +75,6 @@ def test_race_import():
     filename = "race_import_test.vch"
 
     try:
-        # Using targets=['*'] should trigger VouchFinder for everything
-        # We need to run this in a way that allows us to verify results
-        # Since import machinery is global, we must be careful not to break other tests
-        # But pytest runs sequentially (usually)
-
         with vouch.start(filename=filename, targets=['*'], strict=False):
 
             def worker(name):
@@ -92,7 +92,7 @@ def test_race_import():
             for t in threads:
                 t.join()
 
-            # Verify modules are wrapped
+            # Verify modules are wrapped (in-memory check)
             unwrapped_count = 0
             for name in mod_names:
                 if name in sys.modules:

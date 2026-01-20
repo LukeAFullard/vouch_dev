@@ -42,7 +42,8 @@ class TraceSession:
         auto_track_io: bool = False,
         max_artifact_size: int = 1024 * 1024 * 1024,
         light_mode: bool = False,
-        capture_git: bool = True
+        capture_git: bool = True,
+        allow_ephemeral: bool = False
     ):
         """
         Initialize the TraceSession.
@@ -59,9 +60,11 @@ class TraceSession:
             max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
             light_mode: If True, skips hashing of function arguments and results to improve performance.
             capture_git: If True, captures git metadata (default: True).
+            allow_ephemeral: If True, allows ephemeral keys even in strict mode.
         """
         self.filename = filename
         self.strict = strict
+        self.allow_ephemeral = allow_ephemeral
         self.seed = seed
         self.light_mode = light_mode
         self.capture_git = capture_git
@@ -82,6 +85,9 @@ class TraceSession:
                 private_key_path = global_key
             else:
                 # No key found, generate ephemeral
+                if self.strict and not self.allow_ephemeral:
+                    raise RuntimeError("Strict mode enabled: No private key found. Ephemeral keys are forbidden in strict mode. Use 'vouch gen-keys' or strict=False.")
+
                 self._ephemeral_key = CryptoManager.generate_ephemeral_private_key()
                 logger.info("No identity found. Using ephemeral session key.")
 
@@ -122,6 +128,10 @@ class TraceSession:
         try:
             # Setup temporary directory for artifacts
             self.temp_dir = tempfile.mkdtemp()
+
+            # Enable streaming
+            log_path = os.path.join(self.temp_dir, "audit_log.json")
+            self.logger.start_streaming(log_path)
 
             self.logger.log_call(
                 "session.initialize",
@@ -174,9 +184,11 @@ class TraceSession:
         TraceSession._active_session.reset(self._token)
 
         try:
-            # 1. Save audit_log.json
+            # 1. Save audit_log.json (Close stream)
             log_path = os.path.join(self.temp_dir, "audit_log.json")
-            self.logger.save(log_path)
+            if self.logger:
+                self.logger.close()
+            # self.logger.save(log_path) # Already saved via streaming
 
             # 2. Capture environment.lock
             env_path = os.path.join(self.temp_dir, "environment.lock")
