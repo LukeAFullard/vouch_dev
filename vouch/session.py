@@ -39,7 +39,8 @@ class TraceSession:
         tsa_url: Optional[str] = None,
         capture_script: bool = True,
         auto_track_io: bool = False,
-        max_artifact_size: int = 1024 * 1024 * 1024
+        max_artifact_size: int = 1024 * 1024 * 1024,
+        light_mode: bool = False
     ):
         """
         Initialize the TraceSession.
@@ -54,11 +55,13 @@ class TraceSession:
             capture_script: If True, captures the calling script as an artifact.
             auto_track_io: If True, hooks builtins.open to track all file reads.
             max_artifact_size: Maximum size in bytes for a single artifact (default: 1GB).
+            light_mode: If True, skips hashing of function arguments and results to improve performance.
         """
         self.filename = filename
         self.strict = strict
         self.seed = seed
-        self.logger = Logger()
+        self.light_mode = light_mode
+        self.logger = Logger(light_mode=light_mode)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
 

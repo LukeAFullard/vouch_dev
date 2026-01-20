@@ -17,6 +17,21 @@ During the audit, two significant issues were identified and fixed:
     *   **Issue**: The `Hasher` class relied on `str(obj)` for hashing dictionaries. Since Python dictionaries (before 3.7) or certain implementations do not guarantee order in string representation (or if constructed differently), this led to unstable hashes.
     *   **Fix**: Implemented deterministic dictionary hashing by sorting keys before hashing.
 
+### Improvements: Light Mode
+
+To address performance concerns in high-frequency workflows, a new **`light_mode`** has been implemented.
+
+*   **Default Mode (Strict/Full)**:
+    *   Hashes every argument and result of every intercepted function call.
+    *   Ensures maximum traceability and integrity of in-memory data flows.
+    *   Can introduce significant overhead for large objects (e.g., DataFrames).
+
+*   **Light Mode (`light_mode=True`)**:
+    *   Skips hashing of function arguments and results (logging "SKIPPED_LIGHT").
+    *   **Preserves IO Integrity**: File IO operations (read/write) are still fully hashed and verified via the `extra_hashes` mechanism in the `Auditor`.
+    *   **Preserves Context**: Function names, call hierarchy, and string representations (`repr`) of arguments are still logged.
+    *   **Benefit**: Significantly reduces runtime overhead while maintaining audit trail structure and external file integrity.
+
 ### Strengths
 
 *   **Security Design**: The use of RSA signatures (PKCS#1 v1.5 with SHA-256) and RFC 3161 timestamping provides strong guarantees of integrity and non-repudiation.
@@ -27,7 +42,7 @@ During the audit, two significant issues were identified and fixed:
 
 ### Weaknesses & Limitations
 
-*   **Performance Overhead**: The `Auditor` proxy wraps every attribute access and function call. For high-frequency operations or tight loops, this introduces significant runtime overhead. Deep wrapping (wrapping return values recursively) exacerbates this.
+*   **Performance Overhead**: The `Auditor` proxy wraps every attribute access and function call. For high-frequency operations or tight loops, this introduces significant runtime overhead. **Mitigation**: Use `light_mode=True` to skip expensive object hashing.
 *   **Import System Fragility**: The reliance on `sys.meta_path` and retroactive patching of `sys.modules` is powerful but aggressive. It may conflict with other tools that manipulate the import system or with complex circular dependencies.
 *   **Hashing Robustness**: While `pandas` and `numpy` are handled well, other complex objects fall back to string representation hashing. If `__repr__` includes memory addresses or non-deterministic data, verification will fail.
 *   **Concurrency**: While `TraceSession` uses `contextvars` for thread safety, the `Auditor` modifies global state (`sys.modules`). This makes `auto_audit` potentially unsafe if multiple threads attempt to configure different audit targets simultaneously.
@@ -35,5 +50,6 @@ During the audit, two significant issues were identified and fixed:
 ## Recommendations
 
 *   **Usage**: Recommended for critical, audit-sensitive workflows (e.g., final model training, regulatory reporting) rather than high-performance production pipelines.
+*   **Performance**: Use `light_mode=True` for iterative development or performance-critical sections where only IO integrity is required.
 *   **Hashing**: Users should implement `to_csv` or `tobytes` methods on custom classes to ensure reliable hashing, or rely on the updated dictionary hashing.
 *   **Verification**: Always run `vouch verify --strict` on generated packages to ensure timestamp validity and complete integrity.

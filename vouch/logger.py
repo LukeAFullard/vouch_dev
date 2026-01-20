@@ -4,21 +4,27 @@ import datetime
 from .hasher import Hasher
 
 class Logger:
-    def __init__(self):
+    def __init__(self, light_mode=False):
         self.log = []
         self.sequence_number = 0
         self.previous_entry_hash = "0" * 64
+        self.light_mode = light_mode
 
     def log_call(self, target_name, args, kwargs, result, extra_hashes=None, error=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         # Hash arguments and result
-        args_hash = Hasher.hash_object(args)
-        kwargs_hash = Hasher.hash_object(kwargs)
-        if error:
-            result_hash = "ERROR"
+        if self.light_mode:
+            args_hash = "SKIPPED_LIGHT"
+            kwargs_hash = "SKIPPED_LIGHT"
+            result_hash = "SKIPPED_LIGHT" if not error else "ERROR"
         else:
-            result_hash = Hasher.hash_object(result)
+            args_hash = Hasher.hash_object(args)
+            kwargs_hash = Hasher.hash_object(kwargs)
+            if error:
+                result_hash = "ERROR"
+            else:
+                result_hash = Hasher.hash_object(result)
 
         # Create a readable representation for simple types
         # For complex types, we might just store type info
