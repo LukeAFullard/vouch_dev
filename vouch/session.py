@@ -177,6 +177,8 @@ class TraceSession:
 
         except Exception:
             TraceSession._active_session.reset(self._token)
+            if self.logger and hasattr(self.logger, "close"):
+                self.logger.close()
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
             raise
