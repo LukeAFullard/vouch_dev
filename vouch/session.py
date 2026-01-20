@@ -148,7 +148,7 @@ class TraceSession:
                 self._hook_open()
 
         except Exception:
-            TraceSession._active_session.session = None
+            TraceSession._active_session.reset(self._token)
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
             raise

@@ -37,6 +37,20 @@ class Hasher:
                 # NumPy arrays
                 return hashlib.sha256(obj.tobytes()).hexdigest()
 
+            if isinstance(obj, dict):
+                try:
+                    s = json.dumps(obj, sort_keys=True, default=str)
+                    return hashlib.sha256(s.encode('utf-8')).hexdigest()
+                except Exception:
+                    # Fallback if json fails (e.g. keys are not strings)
+                    # We create a sorted representation manually
+                    # Sort by string representation of keys
+                    items = []
+                    for k in sorted(obj.keys(), key=str):
+                        items.append(f"{repr(k)}: {repr(obj[k])}")
+                    s = "{" + ", ".join(items) + "}"
+                    return hashlib.sha256(s.encode('utf-8')).hexdigest()
+
             # Default: String representation or Pickle?
             # String repr is safer but less precise. Pickle can change across versions.
             hasher = hashlib.sha256()
