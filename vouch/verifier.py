@@ -76,11 +76,11 @@ class Verifier:
             if not self._verify_log_chain():
                 return False
 
-            self._verify_environment()
+            env_ok = self._verify_environment()
+            git_ok = self._verify_git_metadata()
+            art_ok = self._verify_artifacts()
 
-            self._verify_git_metadata()
-
-            if not self._verify_artifacts():
+            if not (env_ok and git_ok and art_ok):
                 return False
 
             if data_file:
@@ -246,10 +246,27 @@ class Verifier:
             self._fail("log_chain", f"Log Chain Verification Error: {e}")
             return False
 
-    def _verify_environment(self):
+    def _verify_environment(self) -> bool:
         env_lock_path = os.path.join(self.temp_dir, "environment.lock")
         if not os.path.exists(env_lock_path):
-            return
+            return True
+
+        # Check signature
+        sig_path = env_lock_path + ".sig"
+        if os.path.exists(sig_path):
+             try:
+                pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+                with open(sig_path, "rb") as f:
+                    sig = f.read()
+                CryptoManager.verify_file(pub_key, env_lock_path, sig)
+                self._pass("environment_sig", "Environment Signature: Valid")
+             except Exception as e:
+                self._fail("environment_sig", f"Environment Signature: Invalid ({e})")
+                return False
+
+        elif os.path.exists(os.path.join(self.temp_dir, "signature.sig")):
+             self._fail("environment_sig", "Environment Signature: Missing")
+             return False
 
         try:
             with open(env_lock_path, "r") as f:
@@ -266,13 +283,31 @@ class Verifier:
                 self._warn(f"Environment Mismatch: Recorded Python {recorded_version}, Current {current_version}")
             else:
                 self._pass("environment", f"Environment: Python version matches ({current_version})")
+            return True
         except Exception as e:
             self._warn(f"Could not verify environment: {e}")
+            return True
 
-    def _verify_git_metadata(self):
+    def _verify_git_metadata(self) -> bool:
         git_path = os.path.join(self.temp_dir, "git_metadata.json")
         if not os.path.exists(git_path):
-            return
+            return True
+
+        # Check signature
+        sig_path = git_path + ".sig"
+        if os.path.exists(sig_path):
+             try:
+                pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+                with open(sig_path, "rb") as f:
+                    sig = f.read()
+                CryptoManager.verify_file(pub_key, git_path, sig)
+                self._pass("git_sig", "Git Metadata Signature: Valid")
+             except Exception as e:
+                self._fail("git_sig", f"Git Metadata Signature: Invalid ({e})")
+                return False
+        elif os.path.exists(os.path.join(self.temp_dir, "signature.sig")):
+             self._fail("git_sig", "Git Metadata Signature: Missing")
+             return False
 
         try:
             with open(git_path, "r") as f:
@@ -285,8 +320,10 @@ class Verifier:
                 self._warn(f"Git Repository was DIRTY at capture time (Commit: {sha})")
             else:
                 self._pass("git", f"Git Metadata: Clean commit {sha}")
+            return True
         except Exception as e:
             self._warn(f"Could not parse git metadata: {e}")
+            return True
 
     def _verify_artifacts(self) -> bool:
         artifacts_json_path = os.path.join(self.temp_dir, "artifacts.json")

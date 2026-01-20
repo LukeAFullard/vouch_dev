@@ -532,6 +532,20 @@ class TraceSession:
                 with open(os.path.join(self.temp_dir, "artifacts.json.sig"), "wb") as f:
                     f.write(signature)
 
+            # Sign environment.lock if it exists
+            env_path = os.path.join(self.temp_dir, "environment.lock")
+            if os.path.exists(env_path):
+                signature = CryptoManager.sign_file(private_key, env_path)
+                with open(os.path.join(self.temp_dir, "environment.lock.sig"), "wb") as f:
+                    f.write(signature)
+
+            # Sign git_metadata.json if it exists
+            git_path = os.path.join(self.temp_dir, "git_metadata.json")
+            if os.path.exists(git_path):
+                signature = CryptoManager.sign_file(private_key, git_path)
+                with open(os.path.join(self.temp_dir, "git_metadata.json.sig"), "wb") as f:
+                    f.write(signature)
+
             # Export public key
             public_key = private_key.public_key()
             pem = public_key.public_bytes(
