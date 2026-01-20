@@ -69,8 +69,13 @@ class Hasher:
 
             # Default: String representation or Pickle?
             # String repr is safer but less precise. Pickle can change across versions.
+            s = str(obj)
+            # Check for memory addresses in default repr (e.g., <object at 0x7f...>)
+            if " at 0x" in s and ">" in s:
+                 logger.warning(f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher.")
+
             hasher = hashlib.sha256()
-            hasher.update(str(obj).encode('utf-8'))
+            hasher.update(s.encode('utf-8'))
             return hasher.hexdigest()
         except Exception as e:
             logger.warning(f"Hashing failed for object type {type(obj)}: {e}")

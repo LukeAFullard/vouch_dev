@@ -95,6 +95,7 @@ class TraceSession:
         self.artifacts: Dict[str, str] = {} # Map arcname -> local_path
         self._original_open: Optional[Any] = None
         self._in_tracked_open = False
+        self._thread_local = threading.local()
         self._finders = []
 
     def register_finder(self, finder: Any) -> None:
@@ -322,10 +323,10 @@ class TraceSession:
         def tracked_open(file, mode='r', *args, **kwargs):
             result = self._original_open(file, mode, *args, **kwargs)
 
-            # Recursion guard
-            if not getattr(self, '_in_tracked_open', False):
+            # Recursion guard using thread-local storage
+            if not getattr(self._thread_local, 'in_tracked_open', False):
                 try:
-                    self._in_tracked_open = True
+                    self._thread_local.in_tracked_open = True
                     # Check if file is string and opened for reading
                     if isinstance(file, str) and ('r' in mode or 'rb' in mode):
                          if os.path.exists(file):
@@ -333,7 +334,7 @@ class TraceSession:
                 except Exception:
                     pass
                 finally:
-                    self._in_tracked_open = False
+                    self._thread_local.in_tracked_open = False
 
             return result
 
