@@ -2,6 +2,7 @@ import time
 import json
 import os
 import datetime
+import threading
 from .hasher import Hasher
 
 class Logger:
@@ -14,40 +15,43 @@ class Logger:
         self.stream_path = stream_path
         self._file_handle = None
         self._first_entry = True
+        self._lock = threading.Lock()
 
         if self.stream_path:
             self.start_streaming(self.stream_path)
 
     def start_streaming(self, path):
         """Switch to streaming mode. Flushes existing log to file."""
-        if self._file_handle:
-            return # Already streaming
+        with self._lock:
+            if self._file_handle:
+                return # Already streaming
 
-        self.stream_path = path
-        self._file_handle = open(self.stream_path, "w")
-        self._file_handle.write("[\n") # Start JSON array
-        self._first_entry = True
+            self.stream_path = path
+            self._file_handle = open(self.stream_path, "w")
+            self._file_handle.write("[\n") # Start JSON array
+            self._first_entry = True
 
-        # Flush existing memory log
-        for entry in self.log:
-            if not self._first_entry:
-                self._file_handle.write(",\n")
-            json.dump(entry, self._file_handle, indent=2)
-            self._first_entry = False
+            # Flush existing memory log
+            for entry in self.log:
+                if not self._first_entry:
+                    self._file_handle.write(",\n")
+                json.dump(entry, self._file_handle, indent=2)
+                self._first_entry = False
 
-        self._file_handle.flush()
-        self.log = [] # Free memory
+            self._file_handle.flush()
+            self.log = [] # Free memory
 
     def close(self):
-        if self._file_handle:
-            self._file_handle.write("\n]") # End JSON array
-            self._file_handle.close()
-            self._file_handle = None
+        with self._lock:
+            if self._file_handle:
+                self._file_handle.write("\n]") # End JSON array
+                self._file_handle.close()
+                self._file_handle = None
 
     def log_call(self, target_name, args, kwargs, result, extra_hashes=None, error=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        # Hash arguments and result
+        # Hash arguments and result (outside lock)
         if self.light_mode:
             args_hash = "SKIPPED_LIGHT"
             kwargs_hash = "SKIPPED_LIGHT"
@@ -73,47 +77,57 @@ class Logger:
             except:
                 return f"<{type(obj).__name__}>"
 
-        self.sequence_number += 1
+        # Compute reprs outside lock
+        args_repr = [safe_repr(a) for a in args]
+        kwargs_repr = {k: safe_repr(v) for k, v in kwargs.items()}
+        result_repr = safe_repr(result) if not error else "ERROR"
 
-        entry = {
-            "timestamp": timestamp,
-            "sequence_number": self.sequence_number,
-            "previous_entry_hash": self.previous_entry_hash,
-            "action": "call",
-            "target": target_name,
-            "args_repr": [safe_repr(a) for a in args],
-            "kwargs_repr": {k: safe_repr(v) for k, v in kwargs.items()},
-            "result_repr": safe_repr(result) if not error else "ERROR",
-            "args_hash": args_hash,
-            "kwargs_hash": kwargs_hash,
-            "result_hash": result_hash
-        }
+        with self._lock:
+            self.sequence_number += 1
 
-        if error:
-            entry["error"] = str(error)
-            entry["error_type"] = type(error).__name__
+            entry = {
+                "timestamp": timestamp,
+                "sequence_number": self.sequence_number,
+                "previous_entry_hash": self.previous_entry_hash,
+                "action": "call",
+                "target": target_name,
+                "args_repr": args_repr,
+                "kwargs_repr": kwargs_repr,
+                "result_repr": result_repr,
+                "args_hash": args_hash,
+                "kwargs_hash": kwargs_hash,
+                "result_hash": result_hash
+            }
 
-        if extra_hashes:
-            entry["extra_hashes"] = extra_hashes
+            if error:
+                entry["error"] = str(error)
+                entry["error_type"] = type(error).__name__
 
-        # self.log.append(entry) # disable in-memory log to prevent OOM
-        self.previous_entry_hash = Hasher.hash_object(entry)
+            if extra_hashes:
+                entry["extra_hashes"] = extra_hashes
 
-        if self._file_handle:
-            if not self._first_entry:
-                self._file_handle.write(",\n")
-            json.dump(entry, self._file_handle, indent=2)
-            self._first_entry = False
-            self._file_handle.flush() # Ensure it hits disk
-        else:
-             self.log.append(entry)
+            # self.log.append(entry) # disable in-memory log to prevent OOM
+            self.previous_entry_hash = Hasher.hash_object(entry)
+
+            if self._file_handle:
+                if not self._first_entry:
+                    self._file_handle.write(",\n")
+                json.dump(entry, self._file_handle, indent=2)
+                self._first_entry = False
+                self._file_handle.flush() # Ensure it hits disk
+            else:
+                 self.log.append(entry)
 
     def to_json(self):
         if self.stream_path:
             # If streaming (or finished streaming), read from file
             try:
-                if self._file_handle:
-                    self._file_handle.flush()
+                # We can't lock file reading easily if it's opened elsewhere,
+                # but to_json usually implies reading back what was written.
+                # Flush first to ensure data is there.
+                with self._lock:
+                    if self._file_handle:
+                        self._file_handle.flush()
 
                 if os.path.exists(self.stream_path):
                     with open(self.stream_path, "r") as f:
