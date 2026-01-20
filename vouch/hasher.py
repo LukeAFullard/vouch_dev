@@ -7,6 +7,20 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+class HashWriter:
+    """Adapter to stream write operations to a hasher."""
+    def __init__(self, hasher):
+        self.hasher = hasher
+
+    def write(self, data):
+        if isinstance(data, str):
+            self.hasher.update(data.encode('utf-8'))
+        elif isinstance(data, bytes):
+            self.hasher.update(data)
+
+    def flush(self):
+        pass
+
 class Hasher:
     _registry = {}
 
@@ -41,13 +55,15 @@ class Hasher:
 
             # Special handling for pandas/numpy
             if hasattr(obj, "to_csv"):
+                sha256 = hashlib.sha256()
+                writer = HashWriter(sha256)
                 # Try new argument name first (pandas >= 1.5)
                 try:
-                    csv_str = obj.to_csv(index=True, float_format='%.17g', lineterminator='\n')
+                    obj.to_csv(writer, index=True, float_format='%.17g', lineterminator='\n')
                 except TypeError:
                     # Fallback for older pandas
-                    csv_str = obj.to_csv(index=True, float_format='%.17g', line_terminator='\n')
-                return hashlib.sha256(csv_str.encode('utf-8')).hexdigest()
+                    obj.to_csv(writer, index=True, float_format='%.17g', line_terminator='\n')
+                return sha256.hexdigest()
 
             if hasattr(obj, "tobytes"):
                 # NumPy arrays
@@ -55,8 +71,10 @@ class Hasher:
 
             if isinstance(obj, dict):
                 try:
-                    s = json.dumps(obj, sort_keys=True, default=str)
-                    return hashlib.sha256(s.encode('utf-8')).hexdigest()
+                    sha256 = hashlib.sha256()
+                    writer = HashWriter(sha256)
+                    json.dump(obj, writer, sort_keys=True, default=str)
+                    return sha256.hexdigest()
                 except Exception:
                     # Fallback if json fails (e.g. keys are not strings)
                     # We create a sorted representation manually
