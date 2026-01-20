@@ -8,6 +8,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 class Hasher:
+    _registry = {}
+
+    @classmethod
+    def register(cls, type_obj, func):
+        """Register a custom hash function for a specific type."""
+        cls._registry[type_obj] = func
+
     @staticmethod
     def hash_file(filepath: str) -> str:
         """Hash a file using SHA-256."""
@@ -23,6 +30,15 @@ class Hasher:
     def hash_object(obj: Any) -> str:
         """Determine a deterministic hash for a Python object."""
         try:
+            # 0. Check custom registry
+            for type_obj, func in Hasher._registry.items():
+                if isinstance(obj, type_obj):
+                    return func(obj)
+
+            # 1. Check protocol
+            if hasattr(obj, "__vouch_hash__"):
+                return obj.__vouch_hash__()
+
             # Special handling for pandas/numpy
             if hasattr(obj, "to_csv"):
                 # Try new argument name first (pandas >= 1.5)

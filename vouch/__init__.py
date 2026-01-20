@@ -10,7 +10,7 @@ from .importer import auto_audit
 from .verifier import Verifier
 
 @contextmanager
-def audit(filename=None, targets=None, **kwargs):
+def audit(filename=None, targets=None, excludes=None, **kwargs):
     """
     High-level context manager for simplified auditing.
     Wraps standard libraries (pandas, numpy) and handles session creation.
@@ -18,17 +18,21 @@ def audit(filename=None, targets=None, **kwargs):
     Args:
         filename: Output .vouch file path. If None, generates 'audit_YYYYMMDD_HHMMSS.vch'.
         targets: List of module names to auto-wrap (default: pandas, numpy).
-        **kwargs: Arguments passed to TraceSession (e.g. strict, seed).
+        excludes: List of module names to explicitly exclude from auditing.
+        **kwargs: Arguments passed to TraceSession:
+            - strict (bool): Enforce strict checks (default: True).
+            - light_mode (bool): Skip expensive hashing for performance (default: False).
+            - seed (int): RNG seed.
     """
     if filename is None:
         filename = datetime.datetime.now().strftime("audit_%Y%m%d_%H%M%S.vch")
 
     with TraceSession(filename, **kwargs) as sess:
-        with auto_audit(targets=targets):
+        with auto_audit(targets=targets, excludes=excludes):
             yield sess
 
 @contextmanager
-def start(filename=None, targets=None, **kwargs):
+def start(filename=None, targets=None, excludes=None, **kwargs):
     """
     Start a Vouch audit session. This is the simplest entry point.
 
@@ -40,9 +44,10 @@ def start(filename=None, targets=None, **kwargs):
     Args:
         filename: Output .vouch file path. If None, generates 'audit_YYYYMMDD_HHMMSS.vch'.
         targets: List of module names to auto-wrap (default: pandas, numpy).
+        excludes: List of module names to explicitly exclude from auditing.
         **kwargs: Arguments passed to TraceSession.
     """
-    with audit(filename, targets, **kwargs) as sess:
+    with audit(filename, targets, excludes, **kwargs) as sess:
         yield sess
 
 # Aliases for easier use

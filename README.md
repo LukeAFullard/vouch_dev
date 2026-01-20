@@ -124,6 +124,44 @@ vouch inspect output.vch
 # (vouch) artifacts
 ```
 
+## Modes of Operation
+
+Vouch supports three modes to balance between security/completeness and performance:
+
+### 1. Strict Mode (Default, Recommended for Production)
+Ensures maximum integrity and reproducibility.
+*   **Behavior:**
+    *   Hashes all function inputs and outputs.
+    *   Strictly enforces RNG seeding (raises error for unseeded `torch`/`tensorflow`).
+    *   Strictly validates file existence (raises error if missing).
+    *   Enforces security checks (e.g., rejects symlinks).
+*   **Usage:** `strict=True` (default)
+*   **Best for:** Final regulatory audits, model delivery, "golden" runs.
+
+### 2. Normal Mode
+A balanced mode for everyday use.
+*   **Behavior:**
+    *   Hashes all function inputs and outputs.
+    *   Warns (instead of raising errors) for unseeded RNGs or missing optional keys.
+*   **Usage:** `strict=False`
+*   **Best for:** Development, debugging, non-critical logging.
+
+### 3. Light Mode
+Optimized for high-performance or high-frequency loops.
+*   **Behavior:**
+    *   **Skips expensive hashing** of function arguments and results (logs `"SKIPPED_LIGHT"`).
+    *   **Maintains Integrity:** Still hashes File I/O (reads/writes) and bundles artifacts.
+    *   **Maintains Context:** Still logs function names, call hierarchy, and string representations (`repr`) of arguments.
+*   **Usage:** `light_mode=True` (can be combined with `strict=True` or `strict=False`)
+*   **Best for:** Tight loops, large in-memory objects (huge DataFrames), iterative research where I/O tracking is sufficient.
+
+```python
+# Example: Light Mode for performance
+with vouch.start(light_mode=True):
+    # Operations here run faster as argument hashing is skipped
+    ...
+```
+
 ## ⚠️ Strict Mode & Security
 
 ### RNG Seeding
