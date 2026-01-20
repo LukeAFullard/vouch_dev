@@ -1,5 +1,5 @@
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import rsa, padding, utils
 from cryptography.hazmat.primitives import serialization
 from cryptography.exceptions import InvalidSignature
 from cryptography import x509
@@ -148,16 +148,22 @@ class CryptoManager:
         Signs the content of a file using the private key.
         Returns the signature bytes.
         """
+        hasher = hashes.Hash(hashes.SHA256())
         with open(filepath, "rb") as f:
-            data = f.read()
+            while True:
+                chunk = f.read(65536) # 64KB chunks
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        digest = hasher.finalize()
 
         signature = private_key.sign(
-            data,
+            digest,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
             ),
-            hashes.SHA256()
+            utils.Prehashed(hashes.SHA256())
         )
         return signature
 
@@ -167,15 +173,21 @@ class CryptoManager:
         Verifies the signature of a file.
         Raises InvalidSignature if invalid.
         """
+        hasher = hashes.Hash(hashes.SHA256())
         with open(filepath, "rb") as f:
-            data = f.read()
+            while True:
+                chunk = f.read(65536) # 64KB chunks
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        digest = hasher.finalize()
 
         public_key.verify(
             signature,
-            data,
+            digest,
             padding.PSS(
                 mgf=padding.MGF1(hashes.SHA256()),
                 salt_length=padding.PSS.MAX_LENGTH
             ),
-            hashes.SHA256()
+            utils.Prehashed(hashes.SHA256())
         )

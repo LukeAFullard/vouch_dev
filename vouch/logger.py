@@ -28,14 +28,14 @@ class Logger:
 
             self.stream_path = path
             self._file_handle = open(self.stream_path, "w")
-            self._file_handle.write("[\n") # Start JSON array
+            # NDJSON: No start bracket
             self._first_entry = True
 
             # Flush existing memory log
             for entry in self.log:
-                if not self._first_entry:
-                    self._file_handle.write(",\n")
-                json.dump(entry, self._file_handle, indent=2)
+                # NDJSON: No comma, just newline
+                json.dump(entry, self._file_handle)
+                self._file_handle.write("\n")
                 self._first_entry = False
 
             self._file_handle.flush()
@@ -44,7 +44,7 @@ class Logger:
     def close(self):
         with self._lock:
             if self._file_handle:
-                self._file_handle.write("\n]") # End JSON array
+                # NDJSON: No end bracket
                 self._file_handle.close()
                 self._file_handle = None
 
@@ -110,9 +110,9 @@ class Logger:
             self.previous_entry_hash = Hasher.hash_object(entry)
 
             if self._file_handle:
-                if not self._first_entry:
-                    self._file_handle.write(",\n")
-                json.dump(entry, self._file_handle, indent=2)
+                # NDJSON: write line
+                json.dump(entry, self._file_handle)
+                self._file_handle.write("\n")
                 self._first_entry = False
                 self._file_handle.flush() # Ensure it hits disk
             else:
@@ -131,10 +131,17 @@ class Logger:
 
                 if os.path.exists(self.stream_path):
                     with open(self.stream_path, "r") as f:
-                        content = f.read()
-                        if not content.strip().endswith("]"):
-                             return content + "\n]"
-                        return content
+                        lines = f.readlines()
+                    # Reconstruct list for backward compatibility of to_json() return value
+                    entries = []
+                    for line in lines:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entries.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass # Should not happen with valid NDJSON
+                    return json.dumps(entries, indent=2)
                 else:
                     return json.dumps([])
             except Exception:
@@ -151,5 +158,7 @@ class Logger:
                  shutil.copy(self.stream_path, filepath)
             # If same path, nothing to do (it's already saved)
         else:
+            # Save in-memory log as NDJSON for consistency
             with open(filepath, 'w') as f:
-                json.dump(self.log, f, indent=2)
+                for entry in self.log:
+                    f.write(json.dumps(entry) + "\n")

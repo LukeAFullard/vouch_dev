@@ -66,7 +66,8 @@ class TestAutoAudit(unittest.TestCase):
 
         # Verify log
         with zipfile.ZipFile(self.vch_file, 'r') as z:
-            log = json.loads(z.read("audit_log.json"))
+            content = z.read("audit_log.json").decode('utf-8')
+            log = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         found = False
         for entry in log:

@@ -30,7 +30,8 @@ class TestCustomTriggers(unittest.TestCase):
         # Verify
         with zipfile.ZipFile(filename, "r") as z:
             with z.open("audit_log.json") as f:
-                log = json.load(f)
+                content = f.read().decode('utf-8')
+                log = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         ingest_entry = next(e for e in log if "ingest_stuff" in e["target"])
         export_entry = next(e for e in log if "export_stuff" in e["target"])

@@ -5,6 +5,7 @@ import tempfile
 import json
 import logging
 import shutil
+import ijson
 from typing import Optional, List, Dict, Any, Callable
 
 from .crypto import CryptoManager
@@ -215,16 +216,48 @@ class Verifier:
             else:
                 return True
 
+    def _iterate_log(self, log_path):
+        """Yields log entries, handling both NDJSON and legacy JSON array."""
+        is_array = False
+        try:
+            with open(log_path, 'r') as f:
+                # Check first char to detect array vs NDJSON
+                # Only read 1 char but handle if empty
+                first = f.read(1)
+                if first == '[':
+                    is_array = True
+        except Exception:
+             # If empty or error, let next block handle it
+             pass
+
+        if is_array:
+            # Use ijson for array
+            with open(log_path, 'r') as f:
+                # ijson.items yields generator
+                try:
+                     yield from ijson.items(f, 'item')
+                except Exception as e:
+                     logger.error(f"Error parsing JSON array: {e}")
+                     raise
+        else:
+            # Assume NDJSON
+            with open(log_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line: continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError as e:
+                        # Could be corruption or middle of crash
+                        logger.warning(f"Skipping invalid JSON line: {e}")
+
     def _verify_log_chain(self) -> bool:
         self._print("  [...] Verifying log chain integrity...")
         try:
-            with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
-                log_data = json.load(f)
-
             prev_hash = "0" * 64
             expected_seq = 1
 
-            for i, entry in enumerate(log_data):
+            for i, entry in enumerate(self._iterate_log(os.path.join(self.temp_dir, "audit_log.json"))):
                 if "sequence_number" in entry:
                     if entry["sequence_number"] != expected_seq:
                         self._fail("log_chain", f"Entry {i}: Sequence mismatch (expected {expected_seq}, got {entry['sequence_number']})")
@@ -394,11 +427,8 @@ class Verifier:
         self._print(f"  [...] Verifying external data file: {data_file}")
         self._print(f"        Hash: {data_hash}")
 
-        with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
-            log = json.load(f)
-
         found = False
-        for entry in log:
+        for entry in self._iterate_log(os.path.join(self.temp_dir, "audit_log.json")):
             if "extra_hashes" in entry:
                 for val in entry["extra_hashes"].values():
                     if val == data_hash:
@@ -414,11 +444,8 @@ class Verifier:
             return False
 
     def _verify_auto_data(self, auto_data_dir: str) -> bool:
-        with open(os.path.join(self.temp_dir, "audit_log.json"), "r") as f:
-            log = json.load(f)
-
         referenced_files = {}
-        for entry in log:
+        for entry in self._iterate_log(os.path.join(self.temp_dir, "audit_log.json")):
             if "extra_hashes" in entry:
                 extras = entry["extra_hashes"]
                 for key, path in extras.items():
