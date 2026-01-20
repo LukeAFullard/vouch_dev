@@ -23,7 +23,20 @@ class InspectorShell(cmd.Cmd):
 
         try:
             with zipfile.ZipFile(filepath, 'r') as z:
-                z.extractall(self.temp_dir)
+                # Safe extraction (Zip Slip protection)
+                for member in z.infolist():
+                    name = member.filename
+                    if name.startswith('/') or '..' in name:
+                        print(f"Warning: Skipping suspicious file path in package: {name}")
+                        continue
+
+                    target_path = os.path.join(self.temp_dir, name)
+                    # Canonicalize
+                    if os.path.commonpath([os.path.abspath(target_path), os.path.abspath(self.temp_dir)]) != os.path.abspath(self.temp_dir):
+                        print(f"Warning: Skipping artifact with path traversal: {name}")
+                        continue
+
+                    z.extract(member, self.temp_dir)
 
             with open(os.path.join(self.temp_dir, "audit_log.json"), 'r') as f:
                 self.audit_log = json.load(f)

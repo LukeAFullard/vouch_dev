@@ -8,6 +8,7 @@ setup(
         "cryptography",
         "pandas",
         "numpy",
+        "asn1crypto",
     ],
     entry_points={
         "console_scripts": [

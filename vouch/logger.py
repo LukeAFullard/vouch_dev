@@ -5,11 +5,12 @@ import datetime
 from .hasher import Hasher
 
 class Logger:
-    def __init__(self, light_mode=False, stream_path=None):
+    def __init__(self, light_mode=False, strict=False, stream_path=None):
         self.log = [] # Kept for backward compat / in-memory access if needed, but we should be careful
         self.sequence_number = 0
         self.previous_entry_hash = "0" * 64
         self.light_mode = light_mode
+        self.strict = strict
         self.stream_path = stream_path
         self._file_handle = None
         self._first_entry = True
@@ -52,12 +53,12 @@ class Logger:
             kwargs_hash = "SKIPPED_LIGHT"
             result_hash = "SKIPPED_LIGHT" if not error else "ERROR"
         else:
-            args_hash = Hasher.hash_object(args)
-            kwargs_hash = Hasher.hash_object(kwargs)
+            args_hash = Hasher.hash_object(args, raise_error=self.strict)
+            kwargs_hash = Hasher.hash_object(kwargs, raise_error=self.strict)
             if error:
                 result_hash = "ERROR"
             else:
-                result_hash = Hasher.hash_object(result)
+                result_hash = Hasher.hash_object(result, raise_error=self.strict)
 
         # Create a readable representation for simple types
         # For complex types, we might just store type info
