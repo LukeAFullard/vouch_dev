@@ -45,6 +45,10 @@ The `vouch` package is a forensic logging and verification tool designed to prov
 -   **Issue:** The `Auditor` relied solely on hardcoded naming conventions (`read_`, `to_`, `save`) to decide when to hash files. If a library used non-standard names, side effects might be missed.
 -   **Fix:** `TraceSession` was updated to accept `custom_input_triggers` and `custom_output_triggers`. This allows users to manually configure triggers for non-standard libraries, mitigating the risk of missed audits.
 
+#### F. Timestamp Security (Signature Grafting)
+-   **Issue:** The initial pure Python implementation of timestamp verification did not strictly link the `signed_attributes` (containing the signature) to the `TSTInfo` (content). This could allow "Signature Grafting," where a valid signature is attached to a forged timestamp token.
+-   **Fix:** The verification logic in `vouch/timestamp.py` was hardened to explicitly verify that the `message-digest` attribute in `signed_attrs` matches the hash of the `TSTInfo` content, as required by RFC 5652 (CMS).
+
 ### 2.2 Strengths
 
 -   **Cryptographic Integrity:** The implementation correctly uses `cryptography` primitives (PSS padding for RSA, SHA-256). The hash chain implementation in `Logger` effectively links every action to the previous one.
