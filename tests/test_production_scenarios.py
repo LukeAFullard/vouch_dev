@@ -53,7 +53,8 @@ class TestProductionScenarios(unittest.TestCase):
         # Session closed, temp dir deleted. Read from zip.
         with zipfile.ZipFile(self.vch_path, 'r') as z:
             with z.open("audit_log.json") as f:
-                logs = json.load(f)
+                # Handle NDJSON
+                logs = [json.loads(line) for line in f if line.strip()]
 
         track_entries = [e for e in logs if e['action'] == 'call' and e['target'] == 'track_file']
         self.assertTrue(len(track_entries) > 0, "File open should be tracked")
