@@ -1,5 +1,6 @@
 import time
 import json
+import os
 import datetime
 from .hasher import Hasher
 
@@ -118,32 +119,36 @@ class Logger:
              self.log.append(entry)
 
     def to_json(self):
-        if self._file_handle:
-            # If streaming, try to read the file content
+        if self.stream_path:
+            # If streaming (or finished streaming), read from file
             try:
-                self._file_handle.flush()
-                with open(self.stream_path, "r") as f:
-                    content = f.read()
-                    # It might be incomplete JSON (missing closing ']')
-                    if content.strip().endswith(","):
-                         return content.strip()[:-1] + "\n]"
-                    if not content.strip().endswith("]"):
-                         return content + "\n]"
-                    return content
+                if self._file_handle:
+                    self._file_handle.flush()
+
+                if os.path.exists(self.stream_path):
+                    with open(self.stream_path, "r") as f:
+                        content = f.read()
+                        # It might be incomplete JSON if still streaming
+                        if content.strip().endswith(","):
+                             return content.strip()[:-1] + "\n]"
+                        if not content.strip().endswith("]"):
+                             return content + "\n]"
+                        return content
+                else:
+                    return json.dumps([])
             except Exception:
                  return json.dumps([])
         return json.dumps(self.log, indent=2)
 
     def save(self, filepath):
-        if self._file_handle:
-            # It's already saved to stream_path.
-            # If filepath != stream_path, copy it?
+        if self.stream_path:
+            # If we were streaming, the file is already there (at self.stream_path)
+            self.close() # Ensure flush/close
+
             if filepath != self.stream_path:
-                 self.close() # Ensure pending writes are done
                  import shutil
                  shutil.copy(self.stream_path, filepath)
-            else:
-                 self.close()
+            # If same path, nothing to do (it's already saved)
         else:
             with open(filepath, 'w') as f:
                 json.dump(self.log, f, indent=2)

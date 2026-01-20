@@ -12,14 +12,14 @@ from vouch.auditor import Auditor
 def test_race_open():
     filename = "race_test.vch"
 
-    # Create dummy files
     files = [f"dummy_{i}.txt" for i in range(100)]
     try:
         for f in files:
             with open(f, "w") as fh:
                 fh.write("test")
 
-        session = TraceSession(filename, auto_track_io=True, strict=False)
+        # Correct order
+        session = TraceSession(filename, auto_track_io=True, strict=False, allow_ephemeral=True)
 
         def worker(idx):
             time.sleep(0.001 * (idx % 10))
@@ -36,8 +36,6 @@ def test_race_open():
             for t in threads:
                 t.join()
 
-        # Verify logs from disk (streaming mode clears memory)
-        # Session creates a zip file on exit. We can check that.
         import zipfile
         with zipfile.ZipFile(filename, 'r') as z:
             with z.open("audit_log.json") as f:
@@ -51,7 +49,6 @@ def test_race_open():
         assert track_file_count == 100, f"Expected 100 tracked files, got {track_file_count}"
 
     finally:
-        # Cleanup
         for f in files:
             if os.path.exists(f):
                 os.remove(f)
@@ -59,7 +56,6 @@ def test_race_open():
             os.remove(filename)
 
 def test_race_import():
-    # Setup dummy modules
     dummy_dir = "dummy_mods_race_test"
     if os.path.exists(dummy_dir):
         shutil.rmtree(dummy_dir)
@@ -75,7 +71,7 @@ def test_race_import():
     filename = "race_import_test.vch"
 
     try:
-        with vouch.start(filename=filename, targets=['*'], strict=False):
+        with vouch.start(filename=filename, targets=['*'], strict=False, allow_ephemeral=True):
 
             def worker(name):
                 try:
@@ -92,7 +88,6 @@ def test_race_import():
             for t in threads:
                 t.join()
 
-            # Verify modules are wrapped (in-memory check)
             unwrapped_count = 0
             for name in mod_names:
                 if name in sys.modules:
@@ -105,10 +100,8 @@ def test_race_import():
             assert unwrapped_count == 0, f"{unwrapped_count}/{count} modules missed audit due to race condition."
 
     finally:
-        # Cleanup
         shutil.rmtree(dummy_dir)
         if os.path.exists(filename):
             os.remove(filename)
-        # Clean up sys.modules
         for name in mod_names:
             sys.modules.pop(name, None)

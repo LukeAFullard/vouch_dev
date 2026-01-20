@@ -19,7 +19,7 @@ class TestReporter(unittest.TestCase):
         self.html_path = os.path.join(self.test_dir, "report.html")
 
         # Create a session with some data
-        with TraceSession(self.vch_path, private_key_path=self.priv_key) as sess:
+        with TraceSession(self.vch_path, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             sess.logger.log_call("test_function", ["arg1"], {"kw": "val"}, "result")
 
             artifact_path = os.path.join(self.test_dir, "artifact.txt")

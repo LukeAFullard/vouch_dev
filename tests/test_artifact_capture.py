@@ -35,7 +35,7 @@ class TestArtifactCapture(unittest.TestCase):
 
     def test_capture_artifacts(self):
         # 1. Run session and add artifacts
-        with TraceSession(self.vch_file, private_key_path=self.priv_key) as session:
+        with TraceSession(self.vch_file, private_key_path=self.priv_key, allow_ephemeral=True) as session:
             # Simulate processing
             session.add_artifact(self.input_file)
             session.add_artifact(self.output_file, arcname="result.txt")
@@ -57,7 +57,7 @@ class TestArtifactCapture(unittest.TestCase):
 
     def test_verify_artifacts(self):
         # 1. Create package
-        with TraceSession(self.vch_file, private_key_path=self.priv_key) as session:
+        with TraceSession(self.vch_file, private_key_path=self.priv_key, allow_ephemeral=True) as session:
             session.add_artifact(self.input_file)
 
         # 2. Verify success
@@ -69,7 +69,7 @@ class TestArtifactCapture(unittest.TestCase):
 
     def test_verify_tampered_artifact(self):
          # 1. Create package
-        with TraceSession(self.vch_file, private_key_path=self.priv_key) as session:
+        with TraceSession(self.vch_file, private_key_path=self.priv_key, allow_ephemeral=True) as session:
             session.add_artifact(self.input_file)
 
         # 2. Tamper with the zip

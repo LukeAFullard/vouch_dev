@@ -36,7 +36,7 @@ class TestWeaknesses(unittest.TestCase):
         # Session 1
         vch1 = os.path.join(self.test_dir, "session1.vch")
         rand1 = []
-        with TraceSession(vch1, seed=12345, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch1, seed=12345, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             rand1.append(random.random())
             if np:
                 rand1.append(np.random.rand())
@@ -49,7 +49,7 @@ class TestWeaknesses(unittest.TestCase):
         # To be sure, let's burn some random numbers between sessions
         random.random()
 
-        with TraceSession(vch2, seed=12345, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch2, seed=12345, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             rand2.append(random.random())
             if np:
                 rand2.append(np.random.rand())
@@ -59,7 +59,7 @@ class TestWeaknesses(unittest.TestCase):
 
     def test_log_chaining_missing(self):
         vch = os.path.join(self.test_dir, "chain.vch")
-        with TraceSession(vch, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             sess.logger.log_call("func1", [], {}, "result1")
             sess.logger.log_call("func2", [], {}, "result2")
 
@@ -79,7 +79,7 @@ class TestWeaknesses(unittest.TestCase):
         with open(artifact_path, "w") as f:
             f.write("secret data")
 
-        with TraceSession(vch, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             sess.add_artifact(artifact_path)
 
         # Unzip and check for artifacts.json.sig (or similar)
@@ -96,7 +96,7 @@ class TestWeaknesses(unittest.TestCase):
         with open(track_path, "w") as f:
             f.write("tracked content")
 
-        with TraceSession(vch, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             sess.track_file(track_path)
 
         # Unzip and check audit_log.json
@@ -118,7 +118,7 @@ class TestWeaknesses(unittest.TestCase):
         with open(artifact_path, "w") as f:
             f.write("data")
 
-        with TraceSession(vch, private_key_path=self.priv_key) as sess:
+        with TraceSession(vch, private_key_path=self.priv_key, allow_ephemeral=True) as sess:
             sess.add_artifact(artifact_path)
 
         # Run verify command

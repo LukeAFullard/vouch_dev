@@ -48,7 +48,7 @@ class TestIntegration(unittest.TestCase):
         original_pandas = MockPandas()
         pandas = Auditor(original_pandas, name="pandas")
 
-        with TraceSession(self.vch_file, private_key_path=self.priv_key):
+        with TraceSession(self.vch_file, private_key_path=self.priv_key, allow_ephemeral=True):
             df = pandas.read_csv(self.data_file)
 
         self.assertTrue(os.path.exists(self.vch_file))

@@ -16,7 +16,7 @@ import tests.dummy_utils as dummy_utils
 def test_cross_module_imports():
     # Limitation 1 fix verification
     # Start a session
-    with vouch.start(filename="test_fixes.vch"):
+    with vouch.start(filename="test_fixes.vch", allow_ephemeral=True):
         # dummy_utils.pd should be wrapped
         assert isinstance(dummy_utils.pd, Auditor), "Cross-module imports should be patched"
 
@@ -26,7 +26,7 @@ def test_cross_module_imports():
 
 def test_cross_library_returns():
     # Limitation 2 fix verification
-    with vouch.start(filename="test_fixes.vch"):
+    with vouch.start(filename="test_fixes.vch", allow_ephemeral=True):
         # Create a wrapped dataframe via concat (workaround for constructor limitation)
         df_raw = pd.DataFrame({'a': [1, 2]})
         df = pd.concat([df_raw])
@@ -38,7 +38,7 @@ def test_cross_library_returns():
 
 def test_operator_overloading():
     # Limitation 4 fix verification
-    with vouch.start(filename="test_fixes.vch"):
+    with vouch.start(filename="test_fixes.vch", allow_ephemeral=True):
         df_raw = pd.DataFrame({'a': [1, 2], 'b': [3, 4]})
         df = pd.concat([df_raw])
 
