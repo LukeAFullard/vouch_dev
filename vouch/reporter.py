@@ -17,7 +17,20 @@ class Reporter:
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 with zipfile.ZipFile(vch_path, 'r') as z:
-                    z.extractall(temp_dir)
+                    # Safe extraction (Zip Slip protection)
+                    for member in z.infolist():
+                        name = member.filename
+                        if name.startswith('/') or '..' in name:
+                            continue
+
+                        target_path = os.path.join(temp_dir, name)
+                        try:
+                            if os.path.commonpath([os.path.abspath(target_path), os.path.abspath(temp_dir)]) != os.path.abspath(temp_dir):
+                                continue
+                        except ValueError:
+                            continue
+
+                        z.extract(member, temp_dir)
             except zipfile.BadZipFile:
                 raise ValueError("Invalid Vouch file (not a zip)")
 

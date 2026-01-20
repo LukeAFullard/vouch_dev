@@ -14,10 +14,8 @@ class Differ:
 
         with tempfile.TemporaryDirectory() as temp1, tempfile.TemporaryDirectory() as temp2:
             try:
-                with zipfile.ZipFile(file1, 'r') as z1:
-                    z1.extractall(temp1)
-                with zipfile.ZipFile(file2, 'r') as z2:
-                    z2.extractall(temp2)
+                Differ._safe_extract(file1, temp1)
+                Differ._safe_extract(file2, temp2)
             except Exception as e:
                 print(f"Error opening files: {e}")
                 return
@@ -42,6 +40,24 @@ class Differ:
                 os.path.join(temp2, "artifacts.json"),
                 show_hashes
             )
+
+    @staticmethod
+    def _safe_extract(zip_path, target_dir):
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            # Safe extraction (Zip Slip protection)
+            for member in z.infolist():
+                name = member.filename
+                if name.startswith('/') or '..' in name:
+                    continue
+
+                target_path = os.path.join(target_dir, name)
+                try:
+                    if os.path.commonpath([os.path.abspath(target_path), os.path.abspath(target_dir)]) != os.path.abspath(target_dir):
+                        continue
+                except ValueError:
+                    continue
+
+                z.extract(member, target_dir)
 
     @staticmethod
     def _diff_json(path1, path2, label):

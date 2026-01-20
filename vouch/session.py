@@ -30,6 +30,7 @@ class TraceSession:
     A context manager that records library calls, hashes artifacts, and generates a verifiable audit package.
     """
     _active_session = contextvars.ContextVar("active_session", default=None)
+    _env_lock = threading.Lock()
 
     def __init__(
         self,
@@ -396,10 +397,11 @@ class TraceSession:
             import numpy
             import io
             import contextlib
-            f = io.StringIO()
-            with contextlib.redirect_stdout(f):
-                numpy.show_config()
-            blas_info = f.getvalue()
+            with TraceSession._env_lock:
+                f = io.StringIO()
+                with contextlib.redirect_stdout(f):
+                    numpy.show_config()
+                blas_info = f.getvalue()
         except ImportError:
             blas_info = "NumPy not installed"
         except Exception as e:
