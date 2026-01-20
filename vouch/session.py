@@ -43,7 +43,9 @@ class TraceSession:
         max_artifact_size: int = 1024 * 1024 * 1024,
         light_mode: bool = False,
         capture_git: bool = True,
-        allow_ephemeral: bool = False
+        allow_ephemeral: bool = False,
+        custom_input_triggers: Optional[List[str]] = None,
+        custom_output_triggers: Optional[List[str]] = None
     ):
         """
         Initialize the TraceSession.
@@ -61,6 +63,8 @@ class TraceSession:
             light_mode: If True, skips hashing of function arguments and results to improve performance.
             capture_git: If True, captures git metadata (default: True).
             allow_ephemeral: If True, allows ephemeral keys even in strict mode.
+            custom_input_triggers: List of method substrings (e.g. "load_my_data") to trigger input hashing.
+            custom_output_triggers: List of method substrings (e.g. "export_stuff") to trigger output hashing.
         """
         self.filename = filename
         self.strict = strict
@@ -68,6 +72,8 @@ class TraceSession:
         self.seed = seed
         self.light_mode = light_mode
         self.capture_git = capture_git
+        self.custom_input_triggers = custom_input_triggers or []
+        self.custom_output_triggers = custom_output_triggers or []
         self.logger = Logger(light_mode=light_mode)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None

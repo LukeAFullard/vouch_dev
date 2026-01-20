@@ -3,7 +3,6 @@ import os
 import logging
 import inspect
 from typing import Any, Optional, Callable
-from .session import TraceSession
 from .hasher import Hasher
 
 logger = logging.getLogger(__name__)
@@ -56,6 +55,26 @@ class Auditor:
             return obj._target
         return obj
 
+    def _should_hash_inputs(self, func_name: str) -> bool:
+        if "read" in func_name or "load" in func_name: return True
+
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+        if session and session.custom_input_triggers:
+            for trigger in session.custom_input_triggers:
+                if trigger in func_name: return True
+        return False
+
+    def _should_hash_outputs(self, func_name: str) -> bool:
+        if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name: return True
+
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+        if session and session.custom_output_triggers:
+            for trigger in session.custom_output_triggers:
+                if trigger in func_name: return True
+        return False
+
     def _wrap_result(self, result, name_hint=""):
         """Helper to deeply wrap results if they belong to tracked packages."""
         if result is None:
@@ -77,6 +96,8 @@ class Auditor:
 
         # Check active session for cross-library auditing
         should_audit = False
+
+        from .session import TraceSession
         session = TraceSession.get_active_session()
 
         if session and res_mod:
@@ -125,18 +146,19 @@ class Auditor:
 
         # Inputs hashing
         input_hashes = {}
-        if "read" in func_name or "load" in func_name:
+        if self._should_hash_inputs(func_name):
              input_hashes = self._hash_arguments(func_name, args, kwargs)
 
         result = func(*args, **kwargs)
 
         # Outputs hashing
         output_hashes = {}
-        if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+        if self._should_hash_outputs(func_name):
              output_hashes = self._hash_arguments(func_name, args, kwargs)
 
         extra_hashes = {**input_hashes, **output_hashes}
 
+        from .session import TraceSession
         session = TraceSession.get_active_session()
         if session:
             # If it's a class constructor, log it as such
@@ -197,12 +219,14 @@ class Auditor:
             # --- Pre-execution Hashing (Inputs) ---
             input_hashes = {}
             try:
-                if "read" in func_name or "load" in func_name:
+                if self._should_hash_inputs(func_name):
                      input_hashes = self._hash_arguments(func_name, args, kwargs)
             except Exception:
                 pass # Don't fail audit if hashing fails
 
             full_name = f"{self._name}.{func_name}"
+
+            from .session import TraceSession
             session = TraceSession.get_active_session()
 
             # --- Execute ---
@@ -217,7 +241,7 @@ class Auditor:
             # --- Post-execution Hashing (Outputs) ---
             output_hashes = {}
             try:
-                if "to_" in func_name or "save" in func_name or "dump" in func_name or "write" in func_name:
+                if self._should_hash_outputs(func_name):
                      output_hashes = self._hash_arguments(func_name, args, kwargs)
             except Exception:
                 pass
@@ -244,6 +268,7 @@ class Auditor:
 
     async def _wrap_coroutine(self, coro, name_hint, args, kwargs):
         """Wrapper for async functions (coroutines)."""
+        from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             result = await coro
@@ -257,6 +282,7 @@ class Auditor:
 
     def _wrap_generator(self, gen, name_hint, args, kwargs):
         """Wrapper for generators."""
+        from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             for item in gen:
@@ -274,6 +300,8 @@ class Auditor:
     def __setitem__(self, key, value):
         key = self._unwrap(key)
         value = self._unwrap(value)
+
+        from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             self._target[key] = value
@@ -287,6 +315,8 @@ class Auditor:
 
     def __delitem__(self, key):
         key = self._unwrap(key)
+
+        from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             del self._target[key]
