@@ -44,7 +44,8 @@ class TestLightMode(unittest.TestCase):
         # Extract and check log
         import zipfile
         with zipfile.ZipFile(vch_file, 'r') as z:
-            log_data = json.loads(z.read("audit_log.json"))
+            content = z.read("audit_log.json").decode('utf-8')
+            log_data = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         # Find the entry for my_func
         entry = next(e for e in log_data if e["target"] == "my_func")
@@ -72,7 +73,8 @@ class TestLightMode(unittest.TestCase):
 
         import zipfile
         with zipfile.ZipFile(vch_file, 'r') as z:
-            log_data = json.loads(z.read("audit_log.json"))
+            content = z.read("audit_log.json").decode('utf-8')
+            log_data = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         entry = next(e for e in log_data if e["target"] == "my_func")
 

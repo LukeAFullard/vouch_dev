@@ -66,7 +66,8 @@ class TestWeaknesses(unittest.TestCase):
         # Unzip and check audit_log.json
         import zipfile
         with zipfile.ZipFile(vch, 'r') as z:
-            log_data = json.loads(z.read("audit_log.json"))
+            content = z.read("audit_log.json").decode('utf-8')
+            log_data = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         # Check if entries have chaining info
         for entry in log_data:
@@ -102,7 +103,8 @@ class TestWeaknesses(unittest.TestCase):
         # Unzip and check audit_log.json
         import zipfile
         with zipfile.ZipFile(vch, 'r') as z:
-            log_data = json.loads(z.read("audit_log.json"))
+            content = z.read("audit_log.json").decode('utf-8')
+            log_data = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         found = False
         for entry in log_data:

@@ -68,7 +68,8 @@ class TestAuditReportFixes(unittest.TestCase):
         import zipfile
         with zipfile.ZipFile("uuid.vch", 'r') as z:
             with z.open("audit_log.json") as f:
-                log = json.load(f)
+                content = f.read().decode('utf-8')
+                log = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         # First entry should be session.initialize
         init_entry = log[0]
@@ -88,7 +89,7 @@ class TestAuditReportFixes(unittest.TestCase):
             z.extractall("tampered")
 
         with open("tampered/audit_log.json", "r") as f:
-            log = json.load(f)
+            log = [json.loads(line) for line in f if line.strip()]
 
         # Modify an entry argument but keep previous hashes intact
         # This will cause a mismatch when verifying the NEXT entry's previous_entry_hash
@@ -102,7 +103,8 @@ class TestAuditReportFixes(unittest.TestCase):
             self.fail("Log is empty")
 
         with open("tampered/audit_log.json", "w") as f:
-            json.dump(log, f)
+            for entry in log:
+                f.write(json.dumps(entry) + "\n")
 
         # Generate keys to re-sign (since signature verification happens first)
         from vouch.crypto import CryptoManager

@@ -41,8 +41,7 @@ class Reporter:
 
             audit_log = []
             if os.path.exists(log_path):
-                with open(log_path, 'r') as f:
-                    audit_log = json.load(f)
+                audit_log = Reporter._read_logs(log_path)
 
             env_info = {}
             if os.path.exists(env_path):
@@ -64,6 +63,21 @@ class Reporter:
                 f.write(content)
 
             return True
+
+    @staticmethod
+    def _read_logs(path):
+        try:
+            with open(path, 'r') as f:
+                first = f.read(1)
+
+            with open(path, 'r') as f:
+                if first == '[':
+                    return json.load(f)
+                else:
+                    return [json.loads(line) for line in f if line.strip()]
+        except Exception as e:
+            print(f"Error reading log {path}: {e}")
+            return []
 
     @staticmethod
     def _render_html(filename, log, env, artifacts):

@@ -38,8 +38,9 @@ class InspectorShell(cmd.Cmd):
 
                     z.extract(member, self.temp_dir)
 
-            with open(os.path.join(self.temp_dir, "audit_log.json"), 'r') as f:
-                self.audit_log = json.load(f)
+            log_path = os.path.join(self.temp_dir, "audit_log.json")
+            if os.path.exists(log_path):
+                self.audit_log = self._read_logs(log_path)
 
             if os.path.exists(os.path.join(self.temp_dir, "environment.lock")):
                 with open(os.path.join(self.temp_dir, "environment.lock"), 'r') as f:
@@ -55,6 +56,20 @@ class InspectorShell(cmd.Cmd):
         except Exception as e:
             print(f"Error loading package: {e}")
             self.do_quit(None)
+
+    def _read_logs(self, path):
+        try:
+            with open(path, 'r') as f:
+                first = f.read(1)
+
+            with open(path, 'r') as f:
+                if first == '[':
+                    return json.load(f)
+                else:
+                    return [json.loads(line) for line in f if line.strip()]
+        except Exception as e:
+            print(f"Error reading log {path}: {e}")
+            return []
 
     def do_summary(self, arg):
         """Show summary of the audit package."""

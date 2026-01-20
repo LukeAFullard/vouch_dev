@@ -39,7 +39,8 @@ def test_race_open():
         import zipfile
         with zipfile.ZipFile(filename, 'r') as z:
             with z.open("audit_log.json") as f:
-                log_data = json.load(f)
+                content = f.read().decode('utf-8')
+                log_data = [json.loads(line) for line in content.splitlines() if line.strip()]
 
         track_file_count = 0
         for entry in log_data:

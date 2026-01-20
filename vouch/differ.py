@@ -86,14 +86,29 @@ class Differ:
             print(f"{label} matches.")
 
     @staticmethod
+    def _read_logs(path):
+        """Reads logs from JSON array or NDJSON."""
+        try:
+            with open(path, 'r') as f:
+                first = f.read(1)
+
+            with open(path, 'r') as f:
+                if first == '[':
+                    return json.load(f)
+                else:
+                    return [json.loads(line) for line in f if line.strip()]
+        except Exception as e:
+            print(f"Error reading log {path}: {e}")
+            return []
+
+    @staticmethod
     def _diff_logs(path1, path2):
          if not os.path.exists(path1) or not os.path.exists(path2):
             print("Missing audit_log.json.")
             return
 
-         with open(path1, 'r') as f1, open(path2, 'r') as f2:
-            l1 = json.load(f1)
-            l2 = json.load(f2)
+         l1 = Differ._read_logs(path1)
+         l2 = Differ._read_logs(path2)
 
          print(f"Log 1 entries: {len(l1)}")
          print(f"Log 2 entries: {len(l2)}")
