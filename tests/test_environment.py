@@ -11,7 +11,7 @@ class TestEnvironmentCapture(unittest.TestCase):
         """Test that cpu_info and blas_info are captured in environment.lock"""
         with tempfile.TemporaryDirectory() as temp_dir:
             vch_file = os.path.join(temp_dir, "test.vch")
-            with TraceSession(vch_file) as sess:
+            with TraceSession(vch_file, allow_ephemeral=True) as sess:
                 pass
 
             with zipfile.ZipFile(vch_file, 'r') as z:

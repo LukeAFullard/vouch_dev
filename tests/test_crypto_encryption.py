@@ -61,7 +61,7 @@ class TestCryptoEncryption(unittest.TestCase):
             vch_path,
             private_key_path=self.priv_key_path,
             private_key_password=self.password
-        ) as sess:
+        , allow_ephemeral=True) as sess:
             sess.logger.log_call("test_func", [], {}, None)
 
         # Verify artifacts were signed
@@ -107,7 +107,7 @@ class TestCryptoEncryption(unittest.TestCase):
                 vch_path,
                 private_key_path=self.priv_key_path,
                 private_key_password="wrong"
-            ) as sess:
+            , allow_ephemeral=True) as sess:
                 pass
 
 if __name__ == '__main__':

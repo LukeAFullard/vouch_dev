@@ -28,7 +28,7 @@ class TestAuditFixes(unittest.TestCase):
             # To isolate, let's use the context manager.
 
             try:
-                with TraceSession(vch_file, strict=True) as sess:
+                with TraceSession(vch_file, strict=True, allow_ephemeral=True) as sess:
                      sess.add_artifact(link_file)
                 self.fail("Should have raised ValueError for symlink")
             except ValueError as e:
@@ -44,7 +44,7 @@ class TestAuditFixes(unittest.TestCase):
             # Mock sys.modules to include torch
             with patch.dict(sys.modules, {'torch': MagicMock()}):
                 try:
-                    with TraceSession(vch_file, strict=True) as sess:
+                    with TraceSession(vch_file, strict=True, allow_ephemeral=True) as sess:
                         pass
                     self.fail("Should have raised RuntimeError for unseeded torch in strict mode")
                 except RuntimeError as e:
@@ -55,7 +55,7 @@ class TestAuditFixes(unittest.TestCase):
             # Mock sys.modules to include tensorflow
             with patch.dict(sys.modules, {'tensorflow': MagicMock()}):
                 try:
-                    with TraceSession(vch_file, strict=True) as sess:
+                    with TraceSession(vch_file, strict=True, allow_ephemeral=True) as sess:
                         pass
                     self.fail("Should have raised RuntimeError for unseeded tensorflow in strict mode")
                 except RuntimeError as e:
@@ -71,7 +71,7 @@ class TestAuditFixes(unittest.TestCase):
                 mock_instance = MockClient.return_value
                 mock_instance.request_timestamp.return_value = b"dummy_tsr_data"
 
-                with TraceSession(vch_file, tsa_url="http://fake.tsa") as sess:
+                with TraceSession(vch_file, tsa_url="http://fake.tsa", allow_ephemeral=True) as sess:
                     pass
 
                 # Verify request_timestamp called
@@ -93,7 +93,7 @@ class TestAuditFixes(unittest.TestCase):
                 mock_instance.request_timestamp.side_effect = RuntimeError("TSA Down")
 
                 try:
-                    with TraceSession(vch_file, strict=True, tsa_url="http://fake.tsa") as sess:
+                    with TraceSession(vch_file, strict=True, tsa_url="http://fake.tsa", allow_ephemeral=True) as sess:
                         pass
                     self.fail("Should have raised RuntimeError")
                 except RuntimeError as e:
@@ -152,7 +152,7 @@ class TestAuditFixes(unittest.TestCase):
                 mock_instance = MockClient.return_value
                 mock_instance.request_timestamp.return_value = b"dummy_tsr_data"
 
-                with TraceSession(vch_file, private_key_path=key_path, tsa_url="http://fake.tsa") as sess:
+                with TraceSession(vch_file, private_key_path=key_path, tsa_url="http://fake.tsa", allow_ephemeral=True) as sess:
                     pass
 
             # Mock args

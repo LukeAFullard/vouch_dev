@@ -19,7 +19,7 @@ class TestDiff(unittest.TestCase):
             shutil.rmtree(self.test_dir)
 
     def create_session(self, filepath, operations, artifacts=None):
-        with TraceSession(filepath) as sess:
+        with TraceSession(filepath, allow_ephemeral=True) as sess:
             for op in operations:
                 sess.logger.log_call(op["name"], op.get("args", []), op.get("kwargs", {}), op.get("result", None))
 

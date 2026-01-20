@@ -1,14 +1,60 @@
 import time
 import json
+import os
 import datetime
 from .hasher import Hasher
 
 class Logger:
-    def __init__(self, light_mode=False):
-        self.log = []
+    def __init__(self, light_mode=False, stream_path=None):
+        self.log = [] # Kept for backward compat / in-memory access if needed, but we should be careful
         self.sequence_number = 0
         self.previous_entry_hash = "0" * 64
         self.light_mode = light_mode
+        self.stream_path = stream_path
+        self._file_handle = None
+
+        if self.stream_path:
+            self.start_streaming(self.stream_path)
+
+    def start_streaming(self, path):
+        """Switch to streaming mode. Flushes existing log to file."""
+        if self._file_handle:
+            return # Already streaming
+
+        self.stream_path = path
+        self._file_handle = open(self.stream_path, "w")
+        self._file_handle.write("[\n") # Start JSON array
+
+        # Flush existing memory log
+        for entry in self.log:
+            json.dump(entry, self._file_handle, indent=2)
+            self._file_handle.write(",\n")
+
+        self._file_handle.flush()
+        self.log = [] # Free memory
+
+    def close(self):
+        if self._file_handle:
+            # Remove trailing comma if exists (seek back 2 chars ",\n")
+            # This is tricky with buffering.
+            # Simplified approach: Write a dummy end record or just handle standard JSON parsing issues.
+            # Better approach: JSON Lines (NDJSON) is robust for streaming, but Vouch uses JSON array.
+            # To fix the array:
+            try:
+                pos = self._file_handle.tell()
+                if pos > 2:
+                    self._file_handle.seek(pos - 2) # Assume ",\n"
+                    # Check if it is actually comma
+                    if self._file_handle.read(1) == ",":
+                        self._file_handle.seek(pos - 2)
+                        self._file_handle.truncate()
+                        self._file_handle.write("\n")
+            except Exception:
+                pass
+
+            self._file_handle.write("]") # End JSON array
+            self._file_handle.close()
+            self._file_handle = None
 
     def log_call(self, target_name, args, kwargs, result, extra_hashes=None, error=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -62,12 +108,47 @@ class Logger:
         if extra_hashes:
             entry["extra_hashes"] = extra_hashes
 
-        self.log.append(entry)
+        # self.log.append(entry) # disable in-memory log to prevent OOM
         self.previous_entry_hash = Hasher.hash_object(entry)
 
+        if self._file_handle:
+            json.dump(entry, self._file_handle, indent=2)
+            self._file_handle.write(",\n")
+            self._file_handle.flush() # Ensure it hits disk
+        else:
+             self.log.append(entry)
+
     def to_json(self):
+        if self.stream_path:
+            # If streaming (or finished streaming), read from file
+            try:
+                if self._file_handle:
+                    self._file_handle.flush()
+
+                if os.path.exists(self.stream_path):
+                    with open(self.stream_path, "r") as f:
+                        content = f.read()
+                        # It might be incomplete JSON if still streaming
+                        if content.strip().endswith(","):
+                             return content.strip()[:-1] + "\n]"
+                        if not content.strip().endswith("]"):
+                             return content + "\n]"
+                        return content
+                else:
+                    return json.dumps([])
+            except Exception:
+                 return json.dumps([])
         return json.dumps(self.log, indent=2)
 
     def save(self, filepath):
-        with open(filepath, 'w') as f:
-            json.dump(self.log, f, indent=2)
+        if self.stream_path:
+            # If we were streaming, the file is already there (at self.stream_path)
+            self.close() # Ensure flush/close
+
+            if filepath != self.stream_path:
+                 import shutil
+                 shutil.copy(self.stream_path, filepath)
+            # If same path, nothing to do (it's already saved)
+        else:
+            with open(filepath, 'w') as f:
+                json.dump(self.log, f, indent=2)

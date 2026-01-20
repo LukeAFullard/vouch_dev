@@ -45,7 +45,7 @@ class TestUsabilityFeatures(unittest.TestCase):
         CryptoManager.generate_keys(".vouch/id_rsa", ".vouch/id_rsa.pub")
 
         # Init session without keys
-        sess = TraceSession("test.vch")
+        sess = TraceSession("test.vch", allow_ephemeral=True)
         self.assertEqual(sess.private_key_path, os.path.abspath(".vouch/id_rsa"))
 
     def test_vouch_audit_wrapper(self):
@@ -55,7 +55,7 @@ class TestUsabilityFeatures(unittest.TestCase):
         CryptoManager.generate_keys(".vouch/id_rsa", ".vouch/id_rsa.pub")
 
         # Use the wrapper
-        with vouch.audit("wrapper.vch", targets=["json"]) as sess:
+        with vouch.audit("wrapper.vch", targets=["json"], allow_ephemeral=True) as sess:
             # Check session is active
             self.assertIsNotNone(vouch.TraceSession.get_active_session())
 

@@ -53,7 +53,7 @@ class TestAutoAudit(unittest.TestCase):
         except ImportError:
             self.skipTest("pandas not installed")
 
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, allow_ephemeral=True) as sess:
             with auto_audit():
                 import pandas as pd
                 # pd should be wrapped

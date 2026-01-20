@@ -39,6 +39,7 @@ class VouchFinder(MetaPathFinder):
              self.base_excludes.update(sys.stdlib_module_names)
 
         self.user_excludes = set(excludes) if excludes else set()
+        self._thread_local = threading.local()
 
     def _should_audit(self, fullname):
         # Explicit targets override strict exclusions
@@ -62,16 +63,20 @@ class VouchFinder(MetaPathFinder):
         return fullname in self.targets
 
     def find_spec(self, fullname, path, target=None):
+        # Re-entrancy guard using thread-local storage to avoid recursion
+        # and unsafe modification of sys.meta_path
+        if getattr(self._thread_local, 'disabled', False):
+            return None
+
         if self._should_audit(fullname):
-            # Remove self to find original spec
-            sys.meta_path = [x for x in sys.meta_path if x is not self]
             try:
+                self._thread_local.disabled = True
                 spec = importlib.util.find_spec(fullname)
             except Exception:
                 # If find_spec fails, we can't wrap it
                 spec = None
             finally:
-                sys.meta_path.insert(0, self)
+                self._thread_local.disabled = False
 
             if spec and spec.loader:
                 # Only wrap if it's not a builtin/extension that might break?

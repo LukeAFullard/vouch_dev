@@ -24,7 +24,7 @@ class TestEdgeCases(unittest.TestCase):
         with open(filepath, "w", encoding="utf-8") as f:
             f.write("column1,column2\n1,2")
 
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, allow_ephemeral=True) as sess:
             sess.add_artifact(filepath)
 
         # Verify it exists in the zip with correct name
@@ -51,7 +51,7 @@ class TestEdgeCases(unittest.TestCase):
         with open(filepath, "w") as f:
             pass # Create empty file
 
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, allow_ephemeral=True) as sess:
             sess.add_artifact(filepath)
 
         with zipfile.ZipFile(self.vch_file, 'r') as z:
@@ -75,7 +75,7 @@ class TestEdgeCases(unittest.TestCase):
         with open(filepath, "w") as f:
             f.write("nested data")
 
-        with TraceSession(self.vch_file) as sess:
+        with TraceSession(self.vch_file, allow_ephemeral=True) as sess:
             # We want to preserve the structure "subdir/nested/data.txt" in the artifact
             # arcname allows this
             sess.add_artifact(filepath, arcname="subdir/nested/data.txt")
@@ -101,7 +101,7 @@ class TestEdgeCases(unittest.TestCase):
                 f.write(f"content {i}")
             files.append((name, path))
 
-        with TraceSession(self.vch_file, capture_script=False) as sess:
+        with TraceSession(self.vch_file, capture_script=False, allow_ephemeral=True) as sess:
             for name, path in files:
                 sess.add_artifact(path)
 

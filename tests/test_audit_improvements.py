@@ -15,7 +15,7 @@ def test_async_wrapping():
     wrapped = Auditor(mock, name="mock")
 
     # Needs active session to trigger cross-library wrapping (MockLib != numpy)
-    with vouch.start(targets=["numpy"], filename="test_async.vch"):
+    with vouch.start(targets=["numpy"], filename="test_async.vch", allow_ephemeral=True):
         coro = wrapped.get_data()
         res = asyncio.run(coro)
 
@@ -33,7 +33,7 @@ def test_generator_wrapping():
     wrapped = Auditor(mock, name="mock")
 
     # Needs active session
-    with vouch.start(targets=["numpy"], filename="test_gen.vch"):
+    with vouch.start(targets=["numpy"], filename="test_gen.vch", allow_ephemeral=True):
         gen = wrapped.get_gen()
         items = list(gen)
 
@@ -43,7 +43,7 @@ def test_generator_wrapping():
 
 def test_constructor_limitation():
     # Verify pd.DataFrame() returns UNWRAPPED object (Limitation 4) to support Pickling
-    with vouch.start(filename="test_constructor.vch"):
+    with vouch.start(filename="test_constructor.vch", allow_ephemeral=True):
         df = pd.DataFrame({'a': [1]})
         assert not isinstance(df, Auditor), "DataFrame constructor result should NOT be wrapped (Limitation)"
         assert isinstance(df, pd.DataFrame), "Result should be real DataFrame"
@@ -51,6 +51,6 @@ def test_constructor_limitation():
 def test_stdlib_optin():
     import json
     # Explicitly target json
-    with vouch.start(targets=["json"], filename="test_stdlib.vch"):
+    with vouch.start(targets=["json"], filename="test_stdlib.vch", allow_ephemeral=True):
         import json as local_json
         assert isinstance(local_json, Auditor), "Explicitly targeted stdlib module should be wrapped"

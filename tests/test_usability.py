@@ -38,7 +38,7 @@ class TestUsability(unittest.TestCase):
 
         # Now test via TraceSession (strict=True)
         with self.assertRaises(RuntimeError) as cm:
-            with TraceSession(vch_file, private_key_path=self.priv_key, private_key_password="wrong", strict=True) as sess:
+            with TraceSession(vch_file, private_key_path=self.priv_key, private_key_password="wrong", strict=True, allow_ephemeral=True) as sess:
                 pass
 
         # Check multiline error message
@@ -53,7 +53,7 @@ class TestUsability(unittest.TestCase):
         vch_file = os.path.join(self.test_dir, "test.vch")
 
         with self.assertRaises(FileNotFoundError) as cm:
-             with TraceSession(vch_file, private_key_path=missing_key, strict=True) as sess:
+             with TraceSession(vch_file, private_key_path=missing_key, strict=True, allow_ephemeral=True) as sess:
                 pass
 
         msg = str(cm.exception)
@@ -74,7 +74,7 @@ class TestUsability(unittest.TestCase):
         # Capture stdout
         captured_output = StringIO()
         with patch("sys.stdout", captured_output):
-            with TraceSession(vch_file, capture_script=False) as sess:
+            with TraceSession(vch_file, capture_script=False, allow_ephemeral=True) as sess:
                 for path in artifacts:
                     sess.add_artifact(path)
             # Session exit triggers _package_artifacts -> _process_artifacts -> printing
@@ -94,7 +94,7 @@ class TestUsability(unittest.TestCase):
 
         # Create a session that tracks this file
         # Use private key to sign, as verify expects signatures
-        with TraceSession(vch_file, strict=True, private_key_path=self.priv_key, private_key_password="correct") as sess:
+        with TraceSession(vch_file, strict=True, private_key_path=self.priv_key, private_key_password="correct", allow_ephemeral=True) as sess:
             sess.track_file(data_file)
 
         # Run verify with --auto-data

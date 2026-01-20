@@ -43,7 +43,7 @@ class TestAuditReportFixes(unittest.TestCase):
         """Test concurrent sessions in different threads"""
 
         def run_session(filename):
-            with TraceSession(filename) as sess:
+            with TraceSession(filename, allow_ephemeral=True) as sess:
                 sess.logger.log_call("test", [], {}, None)
 
         t1 = threading.Thread(target=run_session, args=("t1.vch",))
@@ -59,7 +59,7 @@ class TestAuditReportFixes(unittest.TestCase):
 
     def test_session_uuid(self):
         """Test that session UUID is generated and logged"""
-        with TraceSession("uuid.vch") as sess:
+        with TraceSession("uuid.vch", allow_ephemeral=True) as sess:
             self.assertTrue(hasattr(sess, 'session_id'))
             uuid.UUID(sess.session_id) # Should validate
 
@@ -79,7 +79,7 @@ class TestAuditReportFixes(unittest.TestCase):
     def test_chain_verification_failure(self):
         """Test that verify exits with 1 on broken chain"""
         # Create a valid session
-        with TraceSession("valid.vch") as sess:
+        with TraceSession("valid.vch", allow_ephemeral=True) as sess:
             sess.logger.log_call("test", [], {}, None)
 
         # Tamper with it
