@@ -9,6 +9,7 @@ setup(
         "pandas",
         "numpy",
         "asn1crypto",
+        "ijson",
     ],
     entry_points={
         "console_scripts": [
