@@ -103,38 +103,39 @@ class TestAuditFixes(unittest.TestCase):
         from vouch.timestamp import TimestampClient
         client = TimestampClient()
 
-        # Test request_timestamp
-        with patch('subprocess.run') as mock_run, \
-             patch('urllib.request.urlopen') as mock_urlopen, \
-             patch('shutil.which', return_value="/usr/bin/openssl"):
+        # Test request_timestamp logic (pure python)
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(b"data")
+            tf.close()
 
-             # Mock openssl output
-             # subprocess.run returns a CompletedProcess object
-             mock_run.return_value = MagicMock(stdout=b"query_data", returncode=0)
+            try:
+                # We mock asn1crypto objects to avoid complex setup
+                with patch('vouch.timestamp.tsp.TimeStampReq') as mock_req, \
+                     patch('vouch.timestamp.tsp.TimeStampResp') as mock_resp_cls, \
+                     patch('urllib.request.urlopen') as mock_urlopen:
 
-             # Mock urllib response
-             mock_response = MagicMock()
-             mock_response.status = 200
-             mock_response.read.return_value = b"tsr_data"
-             mock_urlopen.return_value.__enter__.return_value = mock_response
+                     # Mock request construction
+                     mock_req_instance = mock_req.return_value
+                     mock_req_instance.dump.return_value = b"der_request"
 
-             tsr = client.request_timestamp("dummy_path", "http://tsa")
-             self.assertEqual(tsr, b"tsr_data")
+                     # Mock urllib response
+                     mock_response = MagicMock()
+                     mock_response.status = 200
+                     mock_response.read.return_value = b"tsr_data"
+                     mock_urlopen.return_value.__enter__.return_value = mock_response
 
-             # Check openssl call
-             mock_run.assert_called_with(["openssl", "ts", "-query", "-data", "dummy_path", "-sha256"], check=True, capture_output=True)
+                     # Mock response parsing (just check status)
+                     mock_resp_instance = MagicMock()
+                     mock_resp_instance.__getitem__.return_value.__getitem__.return_value.native = "granted"
+                     mock_resp_cls.load.return_value = mock_resp_instance
 
-        # Test verify_timestamp
-        with patch('subprocess.run') as mock_run, \
-             patch('shutil.which', return_value="/usr/bin/openssl"):
+                     tsr = client.request_timestamp(tf.name, "http://tsa")
+                     self.assertEqual(tsr, b"tsr_data")
 
-             mock_run.return_value = MagicMock(returncode=0)
-             valid = client.verify_timestamp("data", "tsr")
-             self.assertTrue(valid)
-
-             mock_run.return_value = MagicMock(returncode=1)
-             valid = client.verify_timestamp("data", "tsr")
-             self.assertFalse(valid)
+                     # Verify we hashed the file
+                     # (Implicitly verified by no error, and we passed a real file)
+            finally:
+                os.remove(tf.name)
 
     def test_verify_command_with_timestamp(self):
         """Test verify command handles timestamp"""

@@ -12,6 +12,7 @@ class Logger:
         self.light_mode = light_mode
         self.stream_path = stream_path
         self._file_handle = None
+        self._first_entry = True
 
         if self.stream_path:
             self.start_streaming(self.stream_path)
@@ -24,35 +25,21 @@ class Logger:
         self.stream_path = path
         self._file_handle = open(self.stream_path, "w")
         self._file_handle.write("[\n") # Start JSON array
+        self._first_entry = True
 
         # Flush existing memory log
         for entry in self.log:
+            if not self._first_entry:
+                self._file_handle.write(",\n")
             json.dump(entry, self._file_handle, indent=2)
-            self._file_handle.write(",\n")
+            self._first_entry = False
 
         self._file_handle.flush()
         self.log = [] # Free memory
 
     def close(self):
         if self._file_handle:
-            # Remove trailing comma if exists (seek back 2 chars ",\n")
-            # This is tricky with buffering.
-            # Simplified approach: Write a dummy end record or just handle standard JSON parsing issues.
-            # Better approach: JSON Lines (NDJSON) is robust for streaming, but Vouch uses JSON array.
-            # To fix the array:
-            try:
-                pos = self._file_handle.tell()
-                if pos > 2:
-                    self._file_handle.seek(pos - 2) # Assume ",\n"
-                    # Check if it is actually comma
-                    if self._file_handle.read(1) == ",":
-                        self._file_handle.seek(pos - 2)
-                        self._file_handle.truncate()
-                        self._file_handle.write("\n")
-            except Exception:
-                pass
-
-            self._file_handle.write("]") # End JSON array
+            self._file_handle.write("\n]") # End JSON array
             self._file_handle.close()
             self._file_handle = None
 
@@ -112,8 +99,10 @@ class Logger:
         self.previous_entry_hash = Hasher.hash_object(entry)
 
         if self._file_handle:
+            if not self._first_entry:
+                self._file_handle.write(",\n")
             json.dump(entry, self._file_handle, indent=2)
-            self._file_handle.write(",\n")
+            self._first_entry = False
             self._file_handle.flush() # Ensure it hits disk
         else:
              self.log.append(entry)
@@ -128,9 +117,6 @@ class Logger:
                 if os.path.exists(self.stream_path):
                     with open(self.stream_path, "r") as f:
                         content = f.read()
-                        # It might be incomplete JSON if still streaming
-                        if content.strip().endswith(","):
-                             return content.strip()[:-1] + "\n]"
                         if not content.strip().endswith("]"):
                              return content + "\n]"
                         return content

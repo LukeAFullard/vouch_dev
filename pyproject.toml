@@ -11,6 +11,7 @@ python = "^3.12"
 cryptography = "^46.0.0"
 pandas = "^2.0.0"
 numpy = "^2.0.0"
+asn1crypto = "^1.5.0"
 
 [tool.poetry.scripts]
 vouch = "vouch.cli:main"

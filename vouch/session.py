@@ -43,7 +43,9 @@ class TraceSession:
         max_artifact_size: int = 1024 * 1024 * 1024,
         light_mode: bool = False,
         capture_git: bool = True,
-        allow_ephemeral: bool = False
+        allow_ephemeral: bool = False,
+        custom_input_triggers: Optional[List[str]] = None,
+        custom_output_triggers: Optional[List[str]] = None
     ):
         """
         Initialize the TraceSession.
@@ -61,6 +63,8 @@ class TraceSession:
             light_mode: If True, skips hashing of function arguments and results to improve performance.
             capture_git: If True, captures git metadata (default: True).
             allow_ephemeral: If True, allows ephemeral keys even in strict mode.
+            custom_input_triggers: List of method substrings (e.g. "load_my_data") to trigger input hashing.
+            custom_output_triggers: List of method substrings (e.g. "export_stuff") to trigger output hashing.
         """
         self.filename = filename
         self.strict = strict
@@ -68,6 +72,8 @@ class TraceSession:
         self.seed = seed
         self.light_mode = light_mode
         self.capture_git = capture_git
+        self.custom_input_triggers = custom_input_triggers or []
+        self.custom_output_triggers = custom_output_triggers or []
         self.logger = Logger(light_mode=light_mode)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
@@ -263,6 +269,10 @@ class TraceSession:
 
         self.artifacts[arcname] = filepath
 
+        # Immediate capture if session is active
+        if self.temp_dir and os.path.exists(self.temp_dir):
+             self._safe_copy_artifact(arcname, filepath)
+
     def track_file(self, filepath: str) -> None:
         """
         Manually log a file's hash in the audit trail without bundling it.
@@ -339,10 +349,19 @@ class TraceSession:
             if not getattr(self._thread_local, 'in_tracked_open', False):
                 try:
                     self._thread_local.in_tracked_open = True
-                    # Check if file is string and opened for reading
-                    if isinstance(file, str) and ('r' in mode or 'rb' in mode):
-                         if os.path.exists(file):
-                             self.track_file(file)
+
+                    # Resolve path if it's PathLike
+                    path_str = None
+                    if isinstance(file, (str, os.PathLike)):
+                        try:
+                            path_str = os.fspath(file)
+                        except TypeError:
+                            pass
+
+                    # Check if file is string/path and opened for reading
+                    if path_str and ('r' in mode or 'rb' in mode):
+                         if os.path.exists(path_str):
+                             self.track_file(path_str)
                 except Exception:
                     pass
                 finally:
@@ -395,6 +414,39 @@ class TraceSession:
         with open(filepath, 'w') as f:
             json.dump(env_info, f, indent=2)
 
+    def _safe_copy_artifact(self, name, src_path):
+        data_dir = os.path.join(self.temp_dir, "data")
+        dst_path = os.path.join(data_dir, name)
+
+        # Check if source is symlink (TOCTOU protection)
+        if os.path.islink(src_path):
+            print(f"Warning: Skipping artifact {name} (symlink detected)")
+            return None
+
+        # Check file size
+        try:
+            if os.path.getsize(src_path) > self.max_artifact_size:
+                print(f"Warning: Skipping artifact {name} (exceeds max size)")
+                return None
+        except OSError:
+             return None # Will fail copy later or handled elsewhere
+
+        # Double check destination is within data_dir
+        try:
+            common = os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)])
+            if common != os.path.abspath(data_dir):
+                 print(f"Warning: Skipping artifact {name} (path traversal detected)")
+                 return None
+        except ValueError:
+            print(f"Warning: Skipping artifact {name} (invalid path or different drive)")
+            return None
+
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
+        shutil.copy2(src_path, dst_path)
+        return dst_path
+
     def _process_artifacts(self):
         """
         Copies registered artifacts to temp_dir/data and creates artifacts.json
@@ -412,37 +464,15 @@ class TraceSession:
 
             dst_path = os.path.join(data_dir, name)
 
-            # Check if source is symlink (TOCTOU protection)
-            if os.path.islink(src_path):
-                print(f"Warning: Skipping artifact {name} (symlink detected)")
-                continue
-
-            # Check file size
-            try:
-                if os.path.getsize(src_path) > self.max_artifact_size:
-                    print(f"Warning: Skipping artifact {name} (exceeds max size)")
-                    continue
-            except OSError:
-                 pass # Will fail copy later or handled elsewhere
-
-            # Double check destination is within data_dir
-            try:
-                common = os.path.commonpath([os.path.abspath(dst_path), os.path.abspath(data_dir)])
-                if common != os.path.abspath(data_dir):
-                     print(f"Warning: Skipping artifact {name} (path traversal detected)")
+            # If not already captured (e.g. added before session start), capture now
+            if not os.path.exists(dst_path):
+                 if not self._safe_copy_artifact(name, src_path):
                      continue
-            except ValueError:
-                print(f"Warning: Skipping artifact {name} (invalid path or different drive)")
-                continue
-
-            # Ensure parent directory exists
-            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
-
-            shutil.copy2(src_path, dst_path)
 
             # Hash the file
-            file_hash = Hasher.hash_file(dst_path)
-            manifest[name] = file_hash
+            if os.path.exists(dst_path):
+                file_hash = Hasher.hash_file(dst_path)
+                manifest[name] = file_hash
 
         if total > 10:
              print() # Clear progress line
