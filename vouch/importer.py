@@ -1,9 +1,12 @@
 import sys
 import importlib
 import inspect
+import threading
 from importlib.abc import MetaPathFinder, Loader
 from contextlib import contextmanager
 from .auditor import Auditor
+
+_patch_lock = threading.Lock()
 
 class VouchLoader(Loader):
     def __init__(self, original_loader, name):
@@ -24,25 +27,33 @@ class VouchLoader(Loader):
         sys.modules[self.name] = wrapped
 
 class VouchFinder(MetaPathFinder):
-    def __init__(self, targets=None):
+    def __init__(self, targets=None, excludes=None):
         if targets is None:
             self.targets = {"pandas", "numpy"}
         else:
             self.targets = set(targets)
 
         # Determine strict exclusion list
-        self.excludes = {"vouch", "pytest", "unittest", "pip", "setuptools", "wheel", "_pytest", "pluggy", "iniconfig", "packaging"}
+        self.base_excludes = {"vouch", "pytest", "unittest", "pip", "setuptools", "wheel", "_pytest", "pluggy", "iniconfig", "packaging"}
         if hasattr(sys, "stdlib_module_names"):
-             self.excludes.update(sys.stdlib_module_names)
+             self.base_excludes.update(sys.stdlib_module_names)
+
+        self.user_excludes = set(excludes) if excludes else set()
 
     def _should_audit(self, fullname):
         # Explicit targets override strict exclusions
         if fullname in self.targets:
             return True
 
-        if fullname in self.excludes:
+        # User excludes take precedence over wildcard
+        if fullname in self.user_excludes:
             return False
-        if any(fullname.startswith(p + ".") for p in self.excludes):
+        if any(fullname.startswith(p + ".") for p in self.user_excludes):
+            return False
+
+        if fullname in self.base_excludes:
+            return False
+        if any(fullname.startswith(p + ".") for p in self.base_excludes):
             return False
 
         if "*" in self.targets:
@@ -121,54 +132,57 @@ def _patch_loaded_modules(finder):
             pass
 
 @contextmanager
-def auto_audit(targets=None):
+def auto_audit(targets=None, excludes=None):
     """
     Context manager to automatically wrap specified modules with Auditor.
     targets: list of module names to wrap (default: ['pandas', 'numpy']).
              If targets=['*'], it attempts to wrap all non-standard-library imports.
+    excludes: list of module names to explicitly exclude from auditing (even if wildcard is used).
     """
-    if targets is None:
-        targets = ["pandas", "numpy"]
+    with _patch_lock:
+        if targets is None:
+            targets = ["pandas", "numpy"]
 
-    finder = VouchFinder(targets)
-    sys.meta_path.insert(0, finder)
+        finder = VouchFinder(targets, excludes=excludes)
+        sys.meta_path.insert(0, finder)
 
-    from .session import TraceSession
-    session = TraceSession.get_active_session()
-    if session:
-        session.register_finder(finder)
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+        if session:
+            session.register_finder(finder)
 
-    # Handle already loaded modules
-    original_modules = {}
+        # Handle already loaded modules
+        original_modules = {}
 
-    if "*" in targets:
-        # Scan sys.modules and wrap anything that passes the filter
-        for name in list(sys.modules.keys()):
-            if finder._should_audit(name):
+        if "*" in targets:
+            # Scan sys.modules and wrap anything that passes the filter
+            for name in list(sys.modules.keys()):
+                if finder._should_audit(name):
+                    mod = sys.modules[name]
+                    if not isinstance(mod, Auditor):
+                        original_modules[name] = mod
+                        sys.modules[name] = Auditor(mod, name=name)
+
+        # Wrap specifically listed targets if they are already loaded
+        for name in targets:
+            if name == "*": continue
+            if name in sys.modules:
                 mod = sys.modules[name]
+                # Avoid double wrapping
                 if not isinstance(mod, Auditor):
                     original_modules[name] = mod
                     sys.modules[name] = Auditor(mod, name=name)
 
-    # Wrap specifically listed targets if they are already loaded
-    for name in targets:
-        if name == "*": continue
-        if name in sys.modules:
-            mod = sys.modules[name]
-            # Avoid double wrapping
-            if not isinstance(mod, Auditor):
-                original_modules[name] = mod
-                sys.modules[name] = Auditor(mod, name=name)
-
-    # Patch globals in all user modules to update existing references
-    _patch_loaded_modules(finder)
+        # Patch globals in all user modules to update existing references
+        _patch_loaded_modules(finder)
 
     try:
         yield
     finally:
-        if finder in sys.meta_path:
-            sys.meta_path.remove(finder)
+        with _patch_lock:
+            if finder in sys.meta_path:
+                sys.meta_path.remove(finder)
 
-        # Restore originally loaded modules
-        for name, mod in original_modules.items():
-            sys.modules[name] = mod
+            # Restore originally loaded modules
+            for name, mod in original_modules.items():
+                sys.modules[name] = mod

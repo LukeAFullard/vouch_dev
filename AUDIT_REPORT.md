@@ -32,6 +32,16 @@ To address performance concerns in high-frequency workflows, a new **`light_mode
     *   **Preserves Context**: Function names, call hierarchy, and string representations (`repr`) of arguments are still logged.
     *   **Benefit**: Significantly reduces runtime overhead while maintaining audit trail structure and external file integrity.
 
+### Improvements: Reliability & Extensibility
+
+To address import fragility and hashing robustness, further mitigations were added:
+
+1.  **Thread Safety**: The `auto_audit` mechanism now uses a thread lock to prevent race conditions when patching `sys.meta_path` and `sys.modules`.
+2.  **Explicit Exclusions**: The `audit` and `start` functions now accept an `excludes` list. This allows users to prevent Vouch from wrapping specific fragile modules (like `pytest` internals or complex C-extensions) that might break under introspection.
+3.  **Custom Hashing Protocol**: The `Hasher` now supports two ways to extend hashing for custom objects:
+    *   **Registry**: `Hasher.register(type, func)` allows defining hashers for third-party types.
+    *   **Protocol**: Objects implementing a `__vouch_hash__()` method will have that method called for hashing.
+
 ### Strengths
 
 *   **Security Design**: The use of RSA signatures (PKCS#1 v1.5 with SHA-256) and RFC 3161 timestamping provides strong guarantees of integrity and non-repudiation.
