@@ -18,7 +18,10 @@ def audit(filename=None, targets=None, **kwargs):
     Args:
         filename: Output .vouch file path. If None, generates 'audit_YYYYMMDD_HHMMSS.vch'.
         targets: List of module names to auto-wrap (default: pandas, numpy).
-        **kwargs: Arguments passed to TraceSession (e.g. strict, seed).
+        **kwargs: Arguments passed to TraceSession:
+            - strict (bool): Enforce strict checks (default: True).
+            - light_mode (bool): Skip expensive hashing for performance (default: False).
+            - seed (int): RNG seed.
     """
     if filename is None:
         filename = datetime.datetime.now().strftime("audit_%Y%m%d_%H%M%S.vch")
