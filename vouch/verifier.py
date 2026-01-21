@@ -72,7 +72,8 @@ class Verifier:
                 return False
 
             # Timestamp verification (optional but checked)
-            self._verify_timestamp(tsa_ca_file, strict)
+            if not self._verify_timestamp(tsa_ca_file, strict):
+                return False
 
             if not self._verify_log_chain():
                 return False
