@@ -60,9 +60,12 @@ class Hasher:
                 # Try new argument name first (pandas >= 1.5)
                 try:
                     obj.to_csv(writer, index=True, float_format='%.17g', lineterminator='\n')
-                except TypeError:
-                    # Fallback for older pandas
-                    obj.to_csv(writer, index=True, float_format='%.17g', line_terminator='\n')
+                except TypeError as e:
+                    # Fallback for older pandas only if argument is the issue
+                    if "unexpected keyword argument" in str(e) and "lineterminator" in str(e):
+                        obj.to_csv(writer, index=True, float_format='%.17g', line_terminator='\n')
+                    else:
+                        raise
                 return sha256.hexdigest()
 
             if hasattr(obj, "tobytes"):

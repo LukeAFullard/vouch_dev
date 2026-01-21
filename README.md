@@ -186,6 +186,29 @@ To add legal weight to your audit trail, provide a `tsa_url` to `TraceSession`. 
 
 The `vouch verify` command will automatically verify this timestamp if present.
 
+### Constructor Coverage Gap
+Vouch uses proxies to audit function calls. However, **Class Constructors** (e.g. `pd.DataFrame()`) are intentionally **NOT intercepted**. This is to preserve `isinstance()` compatibility, which is critical for many libraries.
+
+**Implication:** Operations performed on objects created directly via constructors are **not audited** unless those objects are subsequently passed to a wrapped function.
+
+**Best Practice:**
+*   Use **Factory Functions** whenever possible (e.g., `pd.read_csv`, `np.array`, `torch.tensor`). These are fully audited.
+*   If you must use a constructor, ensure the resulting object is used in a subsequent tracked function call to capture its state.
+
+```python
+# ❌ NOT AUDITED
+df = pd.DataFrame({"a": [1, 2]})
+df.mean() # DataFrame.mean is not tracked because df is not a proxy
+
+# ✅ AUDITED (Factory Function)
+df = pd.read_csv("data.csv")
+df.mean() # Tracked!
+
+# ✅ AUDITED (Wrapped Return)
+df = some_audited_function()
+df.mean() # Tracked!
+```
+
 ## Examples
 
 ### Generating Audit Reports
