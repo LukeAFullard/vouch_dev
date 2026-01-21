@@ -220,11 +220,11 @@ class Verifier:
         """Yields log entries, handling both NDJSON and legacy JSON array."""
         is_array = False
         try:
-            with open(log_path, 'r') as f:
+            with open(log_path, 'rb') as f:
                 # Check first char to detect array vs NDJSON
                 # Only read 1 char but handle if empty
                 first = f.read(1)
-                if first == '[':
+                if first == b'[':
                     is_array = True
         except Exception:
              # If empty or error, let next block handle it
@@ -232,7 +232,7 @@ class Verifier:
 
         if is_array:
             # Use ijson for array
-            with open(log_path, 'r') as f:
+            with open(log_path, 'rb') as f:
                 # ijson.items yields generator
                 try:
                      yield from ijson.items(f, 'item')
@@ -241,7 +241,7 @@ class Verifier:
                      raise
         else:
             # Assume NDJSON
-            with open(log_path, 'r') as f:
+            with open(log_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     if not line: continue
