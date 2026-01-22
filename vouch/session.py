@@ -363,9 +363,15 @@ class TraceSession:
                             pass
 
                     # Check if file is string/path and opened for reading
-                    if path_str and ('r' in mode or 'rb' in mode):
-                         if os.path.exists(path_str):
-                             self.track_file(path_str)
+                    if path_str:
+                        if 'r' in mode or 'rb' in mode:
+                             if os.path.exists(path_str):
+                                 self.track_file(path_str)
+                        elif 'w' in mode or 'a' in mode or '+' in mode:
+                             # We cannot hash files opened for writing/appending as content changes or is truncated.
+                             # Warn the user that this IO is not fully audited.
+                             # Only warn once per file to avoid spamming? No, seeing repeated writes is useful context.
+                             logger.warning(f"File opened for write/append is not hashed by auto_track_io: {path_str}")
                 except Exception:
                     pass
                 finally:

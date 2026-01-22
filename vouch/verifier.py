@@ -202,20 +202,14 @@ class Verifier:
                 return True
             else:
                 msg = "Timestamp Verification Failed"
-                self._print(f"    [FAIL] {msg}")
-                if strict:
-                    self._fail("timestamp", msg)
-                    return False
-                else:
-                    return True
-        except Exception as e:
-            msg = f"Timestamp Error: {e}"
-            self._print(f"    [FAIL] {msg}")
-            if strict:
+                # Always fail if timestamp is invalid. Strict mode shouldn't mask tampering.
                 self._fail("timestamp", msg)
                 return False
-            else:
-                return True
+        except Exception as e:
+            msg = f"Timestamp Error: {e}"
+            # Always fail on error if timestamp is present.
+            self._fail("timestamp", msg)
+            return False
 
     def _iterate_log(self, log_path):
         """Yields log entries, handling both NDJSON and legacy JSON array."""
