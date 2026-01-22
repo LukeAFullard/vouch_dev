@@ -150,7 +150,7 @@ A balanced mode for everyday use.
 Optimized for high-performance or high-frequency loops.
 *   **Behavior:**
     *   **Skips expensive hashing** of function arguments and results (logs `"SKIPPED_LIGHT"`).
-    *   **Maintains Integrity:** Still hashes File I/O (reads/writes) and bundles artifacts.
+        *   **Maintains Integrity:** Still hashes File I/O (reads only) and bundles artifacts.
     *   **Maintains Context:** Still logs function names, call hierarchy, and string representations (`repr`) of arguments.
 *   **Usage:** `light_mode=True` (can be combined with `strict=True` or `strict=False`)
 *   **Best for:** Tight loops, large in-memory objects (huge DataFrames), iterative research where I/O tracking is sufficient.
