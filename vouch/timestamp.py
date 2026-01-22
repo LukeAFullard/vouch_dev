@@ -169,12 +169,13 @@ class TimestampClient:
         signature = signer_info['signature'].native
 
         # Extract content bytes (DER of TSTInfo) to verify hash or signature
-        if hasattr(tst_info_data, 'parsed') and tst_info_data.parsed:
-             content_bytes = tst_info_data.parsed.dump()
+        # We prefer .contents (raw bytes) to avoid re-encoding differences
+        if hasattr(tst_info_data, 'contents'):
+             content_bytes = tst_info_data.contents
         elif isinstance(tst_info_data.native, bytes):
              content_bytes = tst_info_data.native
-        elif hasattr(tst_info_data, 'contents'):
-             content_bytes = tst_info_data.contents
+        elif hasattr(tst_info_data, 'parsed') and tst_info_data.parsed:
+             content_bytes = tst_info_data.parsed.dump()
         else:
              logger.error(f"Cannot extract raw bytes from TSTInfo: type {type(tst_info_data.native)}")
              return False

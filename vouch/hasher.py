@@ -96,7 +96,11 @@ class Hasher:
 
             # 1. Check protocol
             if hasattr(obj, "__vouch_hash__"):
-                return obj.__vouch_hash__()
+                res = obj.__vouch_hash__()
+                if isinstance(res, str):
+                    return res
+                # If it returns a state (dict/list), hash that state
+                return Hasher.hash_object(res, raise_error=raise_error)
 
             # Special handling for pandas/numpy
             if hasattr(obj, "to_csv"):
