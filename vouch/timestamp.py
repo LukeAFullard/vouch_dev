@@ -107,6 +107,10 @@ class TimestampClient:
             # Should not happen if OID is correct
             tst_info = tst_info_data.parsed
 
+        if not tst_info:
+            logger.error(f"Failed to parse TSTInfo from token. Type: {type(tst_info_data.native)}")
+            return False
+
         # 1. Verify Message Imprint (Hash)
         # Check algorithm
         algo = tst_info['message_imprint']['hash_algorithm']['algorithm'].native
