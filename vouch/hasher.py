@@ -21,6 +21,51 @@ class HashWriter:
     def flush(self):
         pass
 
+class StableJSONEncoder(json.JSONEncoder):
+    """
+    A custom JSON Encoder that handles unstable objects and cycles
+    to ensure deterministic hashing.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._visited_ids = set()
+
+    def default(self, obj):
+        # Cycle detection for objects processed via default
+        if id(obj) in self._visited_ids:
+             return f"<Cycle: {type(obj).__name__}>"
+        self._visited_ids.add(id(obj))
+
+        try:
+            # 1. Custom protocol
+            if hasattr(obj, "__vouch_hash__"):
+                 return obj.__vouch_hash__()
+
+            # 2. Pandas / Numpy (delegate to Hasher logic)
+            # Hasher.hash_object handles these and returns a hash string.
+            # We return that hash string so it gets embedded in the JSON.
+            if hasattr(obj, "to_csv") or hasattr(obj, "tobytes"):
+                return Hasher.hash_object(obj)
+
+            # 3. Unstable Repr
+            s = str(obj)
+            if " at 0x" in s and ">" in s:
+                 # Try to use __dict__ (state) instead of identity
+                 if hasattr(obj, "__dict__"):
+                     # Return a copy to avoid json's circular reference detection
+                     # if the __dict__ is being traversed (e.g. recursive object)
+                     try:
+                        return dict(obj.__dict__)
+                     except (TypeError, ValueError):
+                        # Fallback if __dict__ is not iterable
+                        return str(obj.__dict__)
+                 return f"<Unstable: {type(obj).__name__}>"
+
+            return s
+        except Exception:
+            # Fallback for anything that fails
+            return f"<Serialization Error: {type(obj).__name__}>"
+
 class Hasher:
     _registry = {}
 
@@ -76,17 +121,24 @@ class Hasher:
                 try:
                     sha256 = hashlib.sha256()
                     writer = HashWriter(sha256)
-                    json.dump(obj, writer, sort_keys=True, default=str)
+                    # Use StableJSONEncoder instead of default=str
+                    # check_circular=False because StableJSONEncoder handles cycles for objects it processes,
+                    # and standard container cycles will be caught by RecursionError (handled below).
+                    json.dump(obj, writer, sort_keys=True, cls=StableJSONEncoder, check_circular=False)
                     return sha256.hexdigest()
-                except Exception:
+                except Exception as e:
                     # Fallback if json fails (e.g. keys are not strings)
                     # We create a sorted representation manually
                     # Sort by string representation of keys
-                    items = []
-                    for k in sorted(obj.keys(), key=str):
-                        items.append(f"{repr(k)}: {repr(obj[k])}")
-                    s = "{" + ", ".join(items) + "}"
-                    return hashlib.sha256(s.encode('utf-8')).hexdigest()
+                    try:
+                        items = []
+                        for k in sorted(obj.keys(), key=str):
+                            items.append(f"{repr(k)}: {repr(obj[k])}")
+                        s = "{" + ", ".join(items) + "}"
+                        return hashlib.sha256(s.encode('utf-8')).hexdigest()
+                    except Exception:
+                        if raise_error: raise e
+                        return "HASH_FAILED_DICT"
 
             # Default: String representation or Pickle?
             # String repr is safer but less precise. Pickle can change across versions.
