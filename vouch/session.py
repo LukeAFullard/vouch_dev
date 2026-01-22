@@ -69,6 +69,21 @@ class TraceSession:
             custom_output_triggers: List of method substrings (e.g. "export_stuff") to trigger output hashing.
         """
         self.filename = filename
+
+        # FAIL FAST: Check if we can write to the output file
+        # We don't want to run a long simulation and then fail to save.
+        output_dir = os.path.dirname(os.path.abspath(self.filename))
+        if output_dir and not os.path.exists(output_dir):
+             if strict:
+                 raise FileNotFoundError(f"Output directory does not exist: {output_dir}")
+        elif output_dir and not os.access(output_dir, os.W_OK):
+             if strict:
+                 raise PermissionError(f"Output directory is not writable: {output_dir}")
+
+        if os.path.exists(self.filename) and not os.access(self.filename, os.W_OK):
+             if strict:
+                 raise PermissionError(f"Output file exists and is not writable: {self.filename}")
+
         self.strict = strict
         self.allow_ephemeral = allow_ephemeral
         self.seed = seed
