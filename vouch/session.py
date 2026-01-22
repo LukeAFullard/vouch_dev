@@ -97,7 +97,7 @@ class TraceSession:
                     raise RuntimeError("Strict mode enabled: No private key found. Ephemeral keys are forbidden in strict mode. Use 'vouch gen-keys' or strict=False.")
 
                 self._ephemeral_key = CryptoManager.generate_ephemeral_private_key()
-                logger.info("No identity found. Using ephemeral session key.")
+                logger.warning("No identity found. Using ephemeral session key. This session is NOT legally verifiable against your identity.")
 
         self.private_key_path = private_key_path
         self.private_key_password = private_key_password

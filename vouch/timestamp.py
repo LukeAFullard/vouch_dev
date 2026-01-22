@@ -224,7 +224,7 @@ class TimestampClient:
 
             # We can cast it to a standard SetOf type to get the correct tag (0x31)
             class Attributes(cms.SetOf):
-                _child_spec = cms.Attribute
+                _child_spec = cms.CMSAttribute
 
             # Re-encode as standard SetOf
             attrs_structure = Attributes(signed_attrs)
