@@ -8,51 +8,23 @@ from .hasher import Hasher
 
 logger = logging.getLogger(__name__)
 
-class Auditor:
+# Cache for dynamic class wrappers to ensure identity preservation
+_class_proxy_cache = {}
+
+class AuditorMixin:
     """
-    A wrapper proxy that intercepts attribute access and function calls for auditing.
+    Shared auditing logic and helpers.
     """
-    def __init__(self, target: Any, name: Optional[str] = None):
-        """
-        Initialize the Auditor.
+    _name = "Unknown"
+    _target = None
 
-        Args:
-            target: The object to wrap.
-            name: The name of the object (used in logs).
-        """
-        # Prevent nested wrapping
-        if isinstance(target, Auditor):
-            self._target = target._target
-            # If name is not provided, inherit from existing wrapper?
-            # Or keep new name? Usually outer name is more relevant or same.
-            if name is None:
-                self._name = target._name
-            else:
-                self._name = name
-        else:
-            self._target = target
-            self._name = name or getattr(target, "__name__", str(target))
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in ("_target", "_name"):
-            super().__setattr__(name, value)
-        else:
-            setattr(self._target, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        if name in ("_target", "_name"):
-            super().__delattr__(name)
-        else:
-            delattr(self._target, name)
-
-    def __getstate__(self):
-        return self.__dict__
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
+    def __init__(self, *args, **kwargs):
+        # Consume arguments to prevent them reaching object.__init__
+        # This fixes MRO issues where wrapped classes pass args up the chain.
+        super().__init__()
 
     def _unwrap(self, obj: Any) -> Any:
-        if isinstance(obj, Auditor):
+        if isinstance(obj, AuditorMixin):
             return obj._target
         return obj
 
@@ -82,7 +54,6 @@ class Auditor:
             return result
 
         # Optimization: If the result is the target itself (chaining), return self.
-        # This preserves wrapper identity.
         if result is self._target:
             return self
 
@@ -112,87 +83,11 @@ class Auditor:
 
         return result
 
-    def __getattr__(self, name: str) -> Any:
-        # Pass through dunder methods or internal attributes to avoid issues
-        if name.startswith("_"):
-            return getattr(self._target, name)
-
-        attr = getattr(self._target, name)
-
-        # If it's a class/type, do NOT wrap it.
-        # Wrapping classes breaks pickling (identity check fails) and strict isinstance checks.
-        # This means constructor calls (e.g. pd.DataFrame()) are not intercepted,
-        # but the resulting objects are compatible with pickle and type checks.
-        if isinstance(attr, type):
-            return attr
-
-        # If it's a callable (and not a class), wrap it
-        if callable(attr):
-            return self._wrap_callable(attr, name)
-
-        # Recursively wrap attributes that are part of the library (heuristic)
-        # Use _wrap_result logic to avoid wrapping primitives/builtins
-        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
-
-    def __call__(self, *args, **kwargs):
-        """
-        Support calling the wrapped object (e.g. for class constructors or functors).
-        """
-        func = self._target
-        func_name = self._name
-
-        # Reuse wrap_callable logic inline
-        args = tuple(self._unwrap(a) for a in args)
-        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
-
-        # Inputs hashing
-        input_hashes = {}
-        if self._should_hash_inputs(func_name):
-             input_hashes = self._hash_arguments(func_name, args, kwargs)
-
-        result = func(*args, **kwargs)
-
-        # Outputs hashing
-        output_hashes = {}
-        if self._should_hash_outputs(func_name):
-             output_hashes = self._hash_arguments(func_name, args, kwargs)
-
-        extra_hashes = {**input_hashes, **output_hashes}
-
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        if session:
-            # If it's a class constructor, log it as such
-            if isinstance(self._target, type):
-                 full_name = f"{self._name}.__init__" # Approximate
-            else:
-                 full_name = f"{self._name}"
-
-            if inspect.iscoroutine(result):
-                log_result = "<coroutine>"
-            elif inspect.isgenerator(result):
-                log_result = "<generator>"
-            else:
-                log_result = result
-            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
-
-        # Handle Async Coroutines
-        if inspect.iscoroutine(result):
-            return self._wrap_coroutine(result, f"{self._name}()")
-
-        # Handle Generators
-        if inspect.isgenerator(result):
-            return self._wrap_generator(result, f"{self._name}()")
-
-        return self._wrap_result(result, name_hint=f"{self._name}()")
-
     def _hash_arguments(self, func_name, args, kwargs):
         """Helper to hash file paths found in arguments."""
         extra_hashes = {}
         # Naive implementation: check arg[0] and specific kwargs
-        # This covers pandas.read_csv(filepath) and df.to_csv(filepath)
 
-        # Check first positional arg
         if args and isinstance(args[0], str) and os.path.exists(args[0]):
             try:
                 file_hash = Hasher.hash_file(args[0])
@@ -211,7 +106,6 @@ class Auditor:
                      raise
                 logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
-        # Check common kwargs for file paths
         for key, val in kwargs.items():
                 if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and isinstance(val, str) and os.path.exists(val):
                     try:
@@ -235,11 +129,9 @@ class Auditor:
     def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Unwrap arguments if they are Auditors
             args = tuple(self._unwrap(a) for a in args)
             kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
 
-            # --- Pre-execution Hashing (Inputs) ---
             input_hashes = {}
             try:
                 if self._should_hash_inputs(func_name):
@@ -249,23 +141,20 @@ class Auditor:
                 session = TraceSession.get_active_session()
                 if session and session.strict:
                     raise
-                pass # Don't fail audit if hashing fails
+                pass
 
             full_name = f"{self._name}.{func_name}"
 
             from .session import TraceSession
             session = TraceSession.get_active_session()
 
-            # --- Execute ---
             try:
                 result = func(*args, **kwargs)
             except Exception as e:
-                # Log exception
                 if session:
                     session.logger.log_call(full_name, args, kwargs, None, extra_hashes=input_hashes, error=e)
                 raise
 
-            # --- Post-execution Hashing (Outputs) ---
             output_hashes = {}
             try:
                 if self._should_hash_outputs(func_name):
@@ -277,23 +166,18 @@ class Auditor:
                     raise
                 pass
 
-            # Combine hashes
             extra_hashes = {**input_hashes, **output_hashes}
 
-            # --- Deep Wrapping Logic ---
-            # Handle Async Coroutines
             if inspect.iscoroutine(result):
                 if session:
                     session.logger.log_call(full_name, args, kwargs, "<coroutine>", extra_hashes)
                 return self._wrap_coroutine(result, full_name, args, kwargs)
 
-            # Handle Generators
             if inspect.isgenerator(result):
                 if session:
                     session.logger.log_call(full_name, args, kwargs, "<generator>", extra_hashes)
                 return self._wrap_generator(result, full_name, args, kwargs)
 
-            # Log success
             if session:
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
@@ -302,13 +186,10 @@ class Auditor:
         return wrapper
 
     async def _wrap_coroutine(self, coro, name_hint, args, kwargs):
-        """Wrapper for async functions (coroutines)."""
         from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             result = await coro
-            # We could log success here too, but it might be noisy.
-            # Ideally we link it to original call.
             return self._wrap_result(result, name_hint=f"{name_hint} (async)")
         except Exception as e:
             if session:
@@ -316,7 +197,6 @@ class Auditor:
             raise
 
     def _wrap_generator(self, gen, name_hint, args, kwargs):
-        """Wrapper for generators."""
         from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
@@ -326,6 +206,202 @@ class Auditor:
             if session:
                 session.logger.log_call(f"{name_hint} (generator)", args, kwargs, None, error=e)
             raise
+
+    def _apply_inplace(self, op, op_name, other):
+        other_val = self._unwrap(other)
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+
+        try:
+            res = op(self._target, other_val)
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None, error=e)
+            raise
+
+        if res is self._target:
+             if session:
+                 session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None)
+             return self
+
+        return self._wrap_result(res, f"{self._name} {op_name} {other}")
+
+    def _create_class_proxy(self, target_cls):
+        """
+        Creates a dynamic subclass of target_cls that mixes in Auditor functionality.
+        This allows objects created via the constructor to be audited while failing isinstance checks.
+        """
+        if target_cls in _class_proxy_cache:
+            return _class_proxy_cache[target_cls]
+
+        # Define the wrapper class
+        # It inherits from target_cls (for isinstance) and AuditorMixin (for functionality)
+        # Note: We do NOT inherit from Auditor to avoid __init__ MRO conflict
+        class AuditedWrapper(target_cls, AuditorMixin):
+            def __init__(self, *args, **kwargs):
+                # Setup Auditor state
+                object.__setattr__(self, "_target", self)
+                object.__setattr__(self, "_name", f"{target_cls.__name__}(...)")
+
+                # Call original init
+                try:
+                    target_cls.__init__(self, *args, **kwargs)
+                except TypeError as e:
+                    # Sometimes wrapper classes confuse MRO or __init__ logic.
+                    # Fallback or re-raise
+                    raise TypeError(f"Failed to initialize wrapped class {target_cls.__name__}: {e}") from e
+
+            def __setattr__(self, name, value):
+                if name in ("_target", "_name"):
+                    object.__setattr__(self, name, value)
+                    return
+
+                if hasattr(target_cls, "__setattr__"):
+                    target_cls.__setattr__(self, name, value)
+                else:
+                    object.__setattr__(self, name, value)
+
+            def __getattribute__(self, name):
+                if name.startswith("_") or name in (
+                    "match", "search",
+                    "_target", "_name", "_unwrap", "_wrap_result",
+                    "_should_hash_inputs", "_should_hash_outputs", "_hash_arguments",
+                    "_wrap_callable", "_wrap_coroutine", "_wrap_generator", "_apply_inplace",
+                    "_create_class_proxy"
+                ):
+                    return object.__getattribute__(self, name)
+
+                val = super().__getattribute__(name)
+
+                if callable(val):
+                    # Special handling for pandas indexers which are callable but mainly used via __getitem__
+                    if name in ("iloc", "loc", "at", "iat"):
+                        return val
+                    return self._wrap_callable(val, name)
+
+                # We return non-callables unwrapped to prevent breaking internal library logic (isinstance checks).
+                # This means attributes (like df.columns) are not audited, but methods (df.mean()) are.
+                return val
+
+            def __getattr__(self, name):
+                if hasattr(target_cls, "__getattr__"):
+                    val = target_cls.__getattr__(self, name)
+                    if callable(val):
+                        return self._wrap_callable(val, name)
+                    return val
+
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+            def __repr__(self):
+                # Ensure we don't recurse if target_cls.__repr__ uses something we hook
+                # Usually safely delegating to super() is fine
+                return super().__repr__()
+
+            # Note: We are missing operator overloads here.
+            # Without them, operators will use target_cls implementation (unwrapped).
+            # This is a limitation, but constructor audit is the main goal.
+            # We could generate them dynamically here if needed.
+
+        # Set metadata
+        AuditedWrapper.__name__ = f"Audited{target_cls.__name__}"
+        AuditedWrapper.__module__ = target_cls.__module__
+
+        _class_proxy_cache[target_cls] = AuditedWrapper
+        return AuditedWrapper
+
+
+class Auditor(AuditorMixin):
+    """
+    A wrapper proxy that intercepts attribute access and function calls for auditing.
+    """
+    def __init__(self, target: Any, name: Optional[str] = None):
+        if isinstance(target, Auditor):
+            self._target = target._target
+            if name is None:
+                self._name = target._name
+            else:
+                self._name = name
+        else:
+            self._target = target
+            self._name = name or getattr(target, "__name__", str(target))
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in ("_target", "_name"):
+            super().__setattr__(name, value)
+        else:
+            setattr(self._target, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in ("_target", "_name"):
+            super().__delattr__(name)
+        else:
+            delattr(self._target, name)
+
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            return getattr(self._target, name)
+
+        attr = getattr(self._target, name)
+
+        if isinstance(attr, type):
+            # Only wrap main data structures to avoid MRO issues with internal classes like Index
+            if attr.__name__ in ("DataFrame", "Series"):
+                return self._create_class_proxy(attr)
+            return attr
+
+        if callable(attr):
+            return self._wrap_callable(attr, name)
+
+        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
+
+    def __call__(self, *args, **kwargs):
+        func = self._target
+        func_name = self._name
+
+        args = tuple(self._unwrap(a) for a in args)
+        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
+
+        input_hashes = {}
+        if self._should_hash_inputs(func_name):
+             input_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        result = func(*args, **kwargs)
+
+        output_hashes = {}
+        if self._should_hash_outputs(func_name):
+             output_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        extra_hashes = {**input_hashes, **output_hashes}
+
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+        if session:
+            if isinstance(self._target, type):
+                 full_name = f"{self._name}.__init__"
+            else:
+                 full_name = f"{self._name}"
+
+            if inspect.iscoroutine(result):
+                log_result = "<coroutine>"
+            elif inspect.isgenerator(result):
+                log_result = "<generator>"
+            else:
+                log_result = result
+            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
+
+        if inspect.iscoroutine(result):
+            return self._wrap_coroutine(result, f"{self._name}()", args, kwargs) # Pass args for error logging
+
+        if inspect.isgenerator(result):
+            return self._wrap_generator(result, f"{self._name}()", args, kwargs)
+
+        return self._wrap_result(result, name_hint=f"{self._name}()")
 
     # --- Proxy Dunder Methods ---
 
@@ -341,7 +417,6 @@ class Auditor:
         try:
             self._target[key] = value
             if session:
-                # Log the modification
                 session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None)
         except Exception as e:
             if session:
@@ -389,29 +464,6 @@ class Auditor:
     def __str__(self):
         return str(self._target)
 
-    # In-place operators helper
-    def _apply_inplace(self, op, op_name, other):
-        other_val = self._unwrap(other)
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-
-        try:
-            res = op(self._target, other_val)
-        except Exception as e:
-            if session:
-                session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None, error=e)
-            raise
-
-        # If it was in-place mutation (identity preserved)
-        if res is self._target:
-             if session:
-                 session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None)
-             return self
-
-        # If it returned a new object (immutable target or copy), return wrapped result
-        return self._wrap_result(res, f"{self._name} {op_name} {other}")
-
-    # Arithmetic operators
     def __add__(self, other):
         return self._wrap_result(self._target + self._unwrap(other), f"{self._name} + {other}")
 
@@ -448,7 +500,6 @@ class Auditor:
     def __imod__(self, other):
         return self._apply_inplace(operator.imod, "__imod__", other)
 
-    # Reverse arithmetic
     def __radd__(self, other):
         return self._wrap_result(self._unwrap(other) + self._target, f"{other} + {self._name}")
 
@@ -461,7 +512,6 @@ class Auditor:
     def __repr__(self):
         return f"<Auditor({self._name}) wrapping {self._target}>"
 
-    # Matrix multiplication
     def __matmul__(self, other):
         return self._wrap_result(self._target @ self._unwrap(other), f"{self._name} @ {other}")
 
@@ -471,7 +521,6 @@ class Auditor:
     def __rmatmul__(self, other):
         return self._wrap_result(self._unwrap(other) @ self._target, f"{other} @ {self._name}")
 
-    # Power
     def __pow__(self, other):
         return self._wrap_result(self._target ** self._unwrap(other), f"{self._name} ** {other}")
 
@@ -481,7 +530,6 @@ class Auditor:
     def __rpow__(self, other):
         return self._wrap_result(self._unwrap(other) ** self._target, f"{other} ** {self._name}")
 
-    # Bitwise operators
     def __and__(self, other):
         return self._wrap_result(self._target & self._unwrap(other), f"{self._name} & {other}")
 
@@ -524,7 +572,6 @@ class Auditor:
     def __invert__(self):
         return self._wrap_result(~self._target, f"~{self._name}")
 
-    # Unary operators
     def __neg__(self):
         return self._wrap_result(-self._target, f"-{self._name}")
 
@@ -534,7 +581,6 @@ class Auditor:
     def __abs__(self):
         return self._wrap_result(abs(self._target), f"abs({self._name})")
 
-    # Comparison
     def __eq__(self, other):
         return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
 

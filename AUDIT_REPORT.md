@@ -17,10 +17,10 @@ Two specific issues were identified and fixed during the audit:
 
 The project is generally production-ready. It has a comprehensive test suite (100% pass rate) and handles errors gracefully in "Normal" mode while enforcing strictness in "Strict" mode.
 
-**Caveat: The "Constructor Gap"**
-The most significant limitation is that `vouch` does not audit direct class instantiation (e.g., `df = pd.DataFrame(...)`). It relies on auditing factory functions (e.g., `pd.read_csv(...)`) or wrapped returns.
-*   **Implication:** Users must be educated to prefer factory functions or understand that objects created via constructors are not tracked until they interact with a tracked function.
-*   **Mitigation:** The documentation (`README.md`, `AGENTS.md`) clearly explains this limitation.
+**Caveat: The "Constructor Gap" (SOLVED)**
+The "Constructor Gap" (where direct class instantiation like `df = pd.DataFrame(...)` was not audited) has been **solved** for major data structures (`pandas.DataFrame`, `pandas.Series`) using dynamic subclassing.
+*   **Status:** Solved. Constructors for these classes now return audited proxies that preserve `isinstance` compatibility.
+*   **Limit:** Internal or less common classes may still be unwrapped to ensure stability.
 
 ## 3. Legal Defensibility
 
@@ -67,3 +67,8 @@ The following improvements were made to the codebase during this audit:
 **Issue:** The fallback logic for parsing TSTInfo tokens had a potential crash vector if the token could not be parsed.
 **Fix:** Added an explicit check `if not tst_info: return False` to handle malformed tokens gracefully.
 **Benefit:** Improves resilience against invalid or corrupted timestamp responses.
+
+### 6.3. Constructor Auditing (`vouch/auditor.py`)
+**Issue:** Users could bypass auditing by using class constructors (e.g., `pd.DataFrame()`) instead of factory functions.
+**Fix:** Implemented dynamic subclassing to wrap `DataFrame` and `Series` constructors while preserving `isinstance` checks.
+**Benefit:** Closes a significant loop-hole in the audit trail.

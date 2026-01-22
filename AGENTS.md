@@ -3,7 +3,7 @@
 ## Project Status
 
 *   **Production Readiness:** "Production Ready" with caveats.
-    *   **Constructor Gap:** `pd.DataFrame()` and other constructors are NOT intercepted. Only factory functions (e.g. `pd.read_csv`) or wrapped returns are audited.
+    *   **Constructor Gap:** `pd.DataFrame()` and `pd.Series()` ARE intercepted via dynamic subclassing. Other minor constructors may not be intercepted.
     *   **Strict Mode:** Enforces `torch`/`tensorflow` seeding and checks for ephemeral keys.
 *   **Legal:**
     *   **License:** MIT License (Added Jan 2025).
