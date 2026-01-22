@@ -28,6 +28,7 @@ class Verifier:
             "warnings": [],
             "checks": {}
         }
+        self.session_config = {}
         # Default reporter logs to logger
         self._reporter = self._default_reporter
 
@@ -67,6 +68,8 @@ class Verifier:
 
             if not self._check_components():
                 return False
+
+            self._scan_session_config()
 
             if not self._verify_signature():
                 return False
@@ -130,6 +133,18 @@ class Verifier:
         """Helper for progress messages that should go to reporter."""
         self._reporter(message, level="INFO", check_name=None)
 
+    def _scan_session_config(self):
+        """Scans the first log entry to extract session configuration."""
+        try:
+             # Just peek at the first entry
+             gen = self._iterate_log(os.path.join(self.temp_dir, "audit_log.json"))
+             first_entry = next(gen)
+             if first_entry.get("target") == "session.initialize":
+                 if "extra_hashes" in first_entry and "config" in first_entry["extra_hashes"]:
+                      self.session_config = first_entry["extra_hashes"]["config"]
+        except (StopIteration, Exception):
+            pass
+
     def _extract_package(self) -> bool:
         try:
             with zipfile.ZipFile(self.filepath, 'r') as z:
@@ -190,7 +205,14 @@ class Verifier:
 
     def _verify_timestamp(self, ca_file, strict) -> bool:
         tsr_path = os.path.join(self.temp_dir, "audit_log.tsr")
+
+        # Check if timestamp was expected
+        expected = self.session_config.get("tsa_url") is not None
+
         if not os.path.exists(tsr_path):
+            if expected:
+                 self._fail("timestamp", "Timestamp Missing (Session was configured with tsa_url)")
+                 return False
             return True
 
         self._print("  [...] Verifying Timestamp...")

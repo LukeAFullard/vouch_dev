@@ -27,6 +27,7 @@ class StableJSONEncoder(json.JSONEncoder):
     to ensure deterministic hashing.
     """
     def __init__(self, *args, **kwargs):
+        self.raise_error = kwargs.pop("raise_error", False)
         super().__init__(*args, **kwargs)
         self._visited_ids = set()
 
@@ -62,7 +63,9 @@ class StableJSONEncoder(json.JSONEncoder):
                  return f"<Unstable: {type(obj).__name__}>"
 
             return s
-        except Exception:
+        except Exception as e:
+            if self.raise_error:
+                raise e
             # Fallback for anything that fails
             return f"<Serialization Error: {type(obj).__name__}>"
 
@@ -128,7 +131,7 @@ class Hasher:
                     # Use StableJSONEncoder instead of default=str
                     # check_circular=False because StableJSONEncoder handles cycles for objects it processes,
                     # and standard container cycles will be caught by RecursionError (handled below).
-                    json.dump(obj, writer, sort_keys=True, cls=StableJSONEncoder, check_circular=False)
+                    json.dump(obj, writer, sort_keys=True, cls=StableJSONEncoder, check_circular=False, raise_error=raise_error)
                     return sha256.hexdigest()
                 except Exception as e:
                     # Fallback if json fails (e.g. keys are not strings)

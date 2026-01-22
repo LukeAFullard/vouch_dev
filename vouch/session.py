@@ -148,7 +148,12 @@ class TraceSession:
                 None,
                 extra_hashes={
                     "session_id": self.session_id,
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "config": {
+                        "strict": self.strict,
+                        "tsa_url": self.tsa_url,
+                        "light_mode": self.light_mode
+                    }
                 }
             )
 
