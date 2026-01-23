@@ -479,8 +479,25 @@ class Auditor(AuditorMixin):
             # Check configured audit classes
             from .session import TraceSession
             session = TraceSession.get_active_session()
-            if session and session.should_audit_class(attr.__name__):
-                return self._create_class_proxy(attr)
+
+            should_audit_class = False
+            if session:
+                if session.should_audit_class(attr.__name__):
+                    should_audit_class = True
+                elif hasattr(attr, "__module__") and session.should_audit(attr.__module__):
+                     # Automatically use dynamic subclassing for all classes in tracked modules
+                     should_audit_class = True
+                     # EXCEPTION: Pandas Index classes have factory behavior/complex MRO that breaks subclassing
+                     if attr.__name__ == "Index" and "pandas" in attr.__module__:
+                        should_audit_class = False
+
+            if should_audit_class:
+                try:
+                    return self._create_class_proxy(attr)
+                except (TypeError, AttributeError, RuntimeError) as e:
+                    # If dynamic subclassing fails (e.g., C-extension type, __slots__ issues),
+                    # fallback to generic Auditor proxy.
+                    pass
 
             # Fallback: Wrap as Auditor (generic proxy)
             # This preserves attribute access (like classmethods) which _wrap_callable destroys.
