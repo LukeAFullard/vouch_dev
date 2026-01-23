@@ -19,7 +19,7 @@ class Verifier:
     Verifies the integrity and authenticity of a Vouch audit package.
     """
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str) -> None:
         self.filepath = filepath
         self.temp_dir: Optional[str] = None
         self.status: Dict[str, Any] = {
@@ -46,21 +46,36 @@ class Verifier:
                auto_data_dir: str = ".",
                tsa_ca_file: Optional[str] = None,
                strict: bool = False,
-               reporter: Optional[Callable[[str, str, Optional[str]], None]] = None) -> bool:
+               reporter: Optional[Callable[[str, str, Optional[str]], None]] = None,
+               trusted_public_key_path: Optional[str] = None) -> bool:
         """
         Run all verification checks.
 
         Args:
             reporter: Optional callback(message, level, check_name) for output.
+            trusted_public_key_path: Path to a trusted public key (PEM) or certificate.
+                                     If provided, verifies signatures against this key.
+                                     If None, verifies against the bundled key (Trust On First Use).
         """
         if reporter:
             self._reporter = reporter
+
+        self.active_public_key = None
 
         if not os.path.exists(self.filepath):
             self._fail("file_exists", f"Error: File {self.filepath} not found.")
             return False
 
         try:
+            if trusted_public_key_path:
+                 if not os.path.exists(trusted_public_key_path):
+                      raise ValueError(f"Trusted key not found: {trusted_public_key_path}")
+                 try:
+                     self.active_public_key = CryptoManager.load_public_key(trusted_public_key_path)
+                     self._print(f"  [INFO] Verifying against TRUSTED public key: {trusted_public_key_path}")
+                 except Exception as e:
+                     raise ValueError(f"Failed to load trusted key: {e}")
+
             self.temp_dir = tempfile.mkdtemp()
 
             if not self._extract_package():
@@ -191,7 +206,13 @@ class Verifier:
 
     def _verify_signature(self) -> bool:
         try:
-            pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+            if self.active_public_key:
+                pub_key = self.active_public_key
+            else:
+                pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+                self.active_public_key = pub_key
+                self._warn("Verifying against BUNDLED public key. This proves consistency but NOT identity.")
+
             with open(os.path.join(self.temp_dir, "signature.sig"), "rb") as f:
                 signature = f.read()
 
@@ -305,7 +326,7 @@ class Verifier:
         sig_path = env_lock_path + ".sig"
         if os.path.exists(sig_path):
              try:
-                pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+                pub_key = self.active_public_key or CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
                 with open(sig_path, "rb") as f:
                     sig = f.read()
                 CryptoManager.verify_file(pub_key, env_lock_path, sig)
@@ -347,7 +368,7 @@ class Verifier:
         sig_path = git_path + ".sig"
         if os.path.exists(sig_path):
              try:
-                pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+                pub_key = self.active_public_key or CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
                 with open(sig_path, "rb") as f:
                     sig = f.read()
                 CryptoManager.verify_file(pub_key, git_path, sig)
@@ -388,7 +409,7 @@ class Verifier:
             return False
 
         try:
-            pub_key = CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
+            pub_key = self.active_public_key or CryptoManager.load_public_key(os.path.join(self.temp_dir, "public_key.pem"))
             with open(artifacts_sig_path, "rb") as f:
                 art_sig = f.read()
             CryptoManager.verify_file(pub_key, artifacts_json_path, art_sig)

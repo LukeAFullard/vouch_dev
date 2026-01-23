@@ -4,6 +4,8 @@ import shutil
 import tempfile
 import json
 import zipfile
+import contextlib
+import io
 from vouch.session import TraceSession
 from vouch.hasher import Hasher
 
@@ -101,9 +103,12 @@ class TestEdgeCases(unittest.TestCase):
                 f.write(f"content {i}")
             files.append((name, path))
 
-        with TraceSession(self.vch_file, capture_script=False, allow_ephemeral=True) as sess:
-            for name, path in files:
-                sess.add_artifact(path)
+        # Patch stdout to prevent "Packaging artifacts..." logs from breaking unittest buffer
+        f = io.StringIO()
+        with contextlib.redirect_stdout(f):
+            with TraceSession(self.vch_file, capture_script=False, allow_ephemeral=True) as sess:
+                for name, path in files:
+                    sess.add_artifact(path)
 
         with zipfile.ZipFile(self.vch_file, 'r') as z:
             manifest = json.loads(z.read("artifacts.json"))

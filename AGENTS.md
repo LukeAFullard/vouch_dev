@@ -8,6 +8,7 @@
 *   **Legal:**
     *   **License:** MIT License (Added Jan 2025).
     *   **Defensibility:** Depends on usage. Constructor gap may leave audit trail incomplete.
+    *   **Verification:** Must use `--public-key` for legal non-repudiation (avoids self-signed trust).
 *   **Codebase:**
     *   `vouch` package.
     *   `TraceSession` is the core context manager.

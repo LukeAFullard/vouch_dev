@@ -18,7 +18,7 @@ class AuditorMixin:
     _name = "Unknown"
     _target = None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         # Consume arguments to prevent them reaching object.__init__
         # This fixes MRO issues where wrapped classes pass args up the chain.
         super().__init__()

@@ -32,6 +32,7 @@ def verify(args):
         auto_data_dir=args.auto_data_dir if args.auto_data_dir else ".",
         tsa_ca_file=args.tsa_ca_file if hasattr(args, 'tsa_ca_file') else None,
         strict=getattr(args, 'strict', False),
+        trusted_public_key_path=getattr(args, 'public_key', None),
         reporter=cli_reporter
     )
 
@@ -114,6 +115,7 @@ def main():
     verify_parser.add_argument("--auto-data-dir", help="Directory to search for referenced files (default: current directory)")
     verify_parser.add_argument("--tsa-ca-file", help="Path to TSA CA certificate for timestamp verification")
     verify_parser.add_argument("--strict", action="store_true", help="Fail verification if timestamp validation fails")
+    verify_parser.add_argument("--public-key", help="Path to a trusted public key for signature verification")
 
     # gen-keys
     gen_keys_parser = subparsers.add_parser("gen-keys", help="Generate RSA key pair")

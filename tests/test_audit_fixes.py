@@ -161,6 +161,8 @@ class TestAuditFixes(unittest.TestCase):
             args.file = vch_file
             args.data = None
             args.auto_data = False
+            args.public_key = None
+            args.strict = False
 
             # Run verify
             from vouch.cli import verify

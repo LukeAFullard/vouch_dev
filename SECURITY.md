@@ -25,7 +25,18 @@ Vouch is designed to provide **tamper-evident logging** and **reproducibility** 
 *   **Private Keys:** Protect your private key with a strong password. Do not commit private keys to version control.
 *   **Rotation:** Generate new keys for new cases or projects.
 
-### 2. Strict Mode
+### 2. Trusted Verification (Critical for Legal Defense)
+By default, `vouch verify` checks the signature using the public key **embedded in the package**. This proves the package is internally consistent but **does not prove the identity of the signer** (since an attacker could resign the package with their own key and replace the embedded public key).
+
+For legal defensibility and non-repudiation, **the verifier MUST supply the known, trusted public key** of the analyst:
+
+```bash
+vouch verify audit.vch --public-key /path/to/analyst_id_rsa.pub
+```
+
+This ensures the package was signed by the specific private key corresponding to that public key.
+
+### 3. Strict Mode
 Always use `strict=True` (default) in production. This ensures that missing files or invalid artifact names cause immediate failure rather than silent omission.
 
 ```python
@@ -33,13 +44,13 @@ with TraceSession("audit.vch", strict=True, ...) as sess:
     ...
 ```
 
-### 3. Environment Isolation
+### 4. Environment Isolation
 Run audits in isolated environments (e.g., Docker, virtualenv) to ensure `pip freeze` accurately reflects the dependencies used.
 
-### 4. Code Capture
+### 5. Code Capture
 Vouch automatically captures the executing script. Ensure your script is self-contained. Do not rely on external unversioned scripts or manual interactive inputs if reproducibility is critical.
 
-### 5. Artifact Size
+### 6. Artifact Size
 Be aware of the `max_artifact_size` (default: 1GB). Adjust this limit if necessary, but be mindful of the resulting `.vch` package size and system resources.
 
 ## Reporting Vulnerabilities
