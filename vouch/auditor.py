@@ -262,6 +262,7 @@ class AuditorMixin:
                     object.__setattr__(self, name, value)
 
             def __getattribute__(self, name):
+                # Avoid recursion for internal lookups
                 if name.startswith("_") or name in (
                     "match", "search",
                     "_target", "_name", "_unwrap", "_wrap_result",
@@ -271,36 +272,122 @@ class AuditorMixin:
                 ):
                     return object.__getattribute__(self, name)
 
+                # Delegate to super class (MRO)
                 val = super().__getattribute__(name)
 
                 if callable(val):
                     # Special handling for pandas indexers which are callable but mainly used via __getitem__
                     if name in ("iloc", "loc", "at", "iat"):
-                        return val
-                    return self._wrap_callable(val, name)
+                        # Wrap it so we audit __getitem__
+                        wrapper_res = object.__getattribute__(self, "_wrap_result")
+                        return wrapper_res(val, name_hint=f"{self._name}.{name}")
 
-                # We return non-callables unwrapped to prevent breaking internal library logic (isinstance checks).
-                # This means attributes (like df.columns) are not audited, but methods (df.mean()) are.
+                    # Wrap callable using self._wrap_callable
+                    # self._wrap_callable is inherited from AuditorMixin
+                    wrapper_func = object.__getattribute__(self, "_wrap_callable")
+                    return wrapper_func(val, name)
+
                 return val
-
-            def __getattr__(self, name):
-                if hasattr(target_cls, "__getattr__"):
-                    val = target_cls.__getattr__(self, name)
-                    if callable(val):
-                        return self._wrap_callable(val, name)
-                    return val
-
-                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
             def __repr__(self):
                 # Ensure we don't recurse if target_cls.__repr__ uses something we hook
                 # Usually safely delegating to super() is fine
                 return super().__repr__()
 
-            # Note: We are missing operator overloads here.
-            # Without them, operators will use target_cls implementation (unwrapped).
-            # This is a limitation, but constructor audit is the main goal.
-            # We could generate them dynamically here if needed.
+        # --- Dynamic Operator Overloading ---
+        # We inject operator methods into AuditedWrapper to ensure operations like
+        # df + 1 are intercepted and logged.
+
+        def make_operator(op_name, is_inplace=False):
+            def wrapper(self, *args):
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+
+                # Unwrap args
+                unwrapped_args = tuple(self._unwrap(a) for a in args)
+
+                try:
+                    # Resolve method via MRO to ensure we get the correct implementation
+                    # We start search from target_cls (skipping self/AuditedWrapper)
+
+                    func = None
+                    # Use target_cls.mro() which includes target_cls and its bases
+                    for cls in target_cls.mro():
+                        if op_name in cls.__dict__:
+                            func = cls.__dict__[op_name]
+                            break
+
+                    if func is None:
+                         # Fallback to object (common for __eq__, __ne__) if not in MRO of target_cls
+                         # (though target_cls MRO usually ends in object)
+                         func = getattr(object, op_name, None)
+
+                    if func is None:
+                        return NotImplemented
+
+                    # Invoke the function
+                    if hasattr(func, '__get__'):
+                         # Bind to self if descriptor
+                         bound_method = func.__get__(self, target_cls)
+                         res = bound_method(*unwrapped_args)
+                    else:
+                         res = func(self, *unwrapped_args)
+
+                except Exception as e:
+                    if session:
+                        session.logger.log_call(f"{self._name}.{op_name}", args, {}, None, error=e)
+                    raise
+
+                if session:
+                    # Capture result representation logic
+                    log_res = res
+                    if is_inplace:
+                        log_res = None # Avoid logging huge object if it's just self
+
+                    session.logger.log_call(f"{self._name}.{op_name}", args, {}, log_res)
+
+                if is_inplace:
+                    return self
+
+                # Log result
+                desc = f"{self._name} {op_name} {args}"
+                # Ensure we use AuditorMixin._wrap_result bound to self
+                if hasattr(self, "_wrap_result"):
+                     return self._wrap_result(res, name_hint=desc)
+                return res
+            return wrapper
+
+        ops = [
+            '__add__', '__sub__', '__mul__', '__truediv__', '__floordiv__', '__mod__',
+            '__pow__', '__lshift__', '__rshift__', '__and__', '__xor__', '__or__',
+            '__matmul__',
+            '__radd__', '__rsub__', '__rmul__', '__rtruediv__', '__rfloordiv__', '__rmod__',
+            '__rpow__', '__rlshift__', '__rrshift__', '__rand__', '__rxor__', '__ror__',
+            '__rmatmul__',
+            '__iadd__', '__isub__', '__imul__', '__itruediv__', '__ifloordiv__', '__imod__',
+            '__ipow__', '__ilshift__', '__irshift__', '__iand__', '__ixor__', '__ior__',
+            '__imatmul__',
+            '__neg__', '__pos__', '__abs__', '__invert__',
+            '__lt__', '__le__', '__eq__', '__ne__', '__gt__', '__ge__',
+            # Container ops
+            '__getitem__', '__setitem__', '__delitem__', '__len__', '__iter__'
+        ]
+
+        for op in ops:
+            # Only wrap if the target class actually supports it (or object does)
+            # This prevents adding __len__ to things that don't support it, etc.
+            # However, for arithmetic operators, it's safer to add them if we want to support duck typing,
+            # but checking for existence in MRO is safer to avoid confusing python.
+
+            should_wrap = False
+            for cls in target_cls.mro():
+                if op in cls.__dict__:
+                    should_wrap = True
+                    break
+
+            if should_wrap:
+                 is_inplace = op.startswith("__i")
+                 setattr(AuditedWrapper, op, make_operator(op, is_inplace=is_inplace))
 
         # Set metadata
         AuditedWrapper.__name__ = f"Audited{target_cls.__name__}"
@@ -325,8 +412,17 @@ class Auditor(AuditorMixin):
             self._target = target
             self._name = name or getattr(target, "__name__", str(target))
 
+        # Sanity check
+        if self._target is self:
+             # This should be impossible in __init__ as self is new.
+             # Unless object.__new__ returned existing object? (Singleton?)
+             # Auditor inherits from object.
+             raise ValueError(f"Auditor target cannot be self. Target: {target}, Self: {self}")
+
     def __setattr__(self, name: str, value: Any) -> None:
         if name in ("_target", "_name"):
+            # if name == "_target" and value is self:
+            #     raise RuntimeError("Attempting to set _target to self")
             super().__setattr__(name, value)
         else:
             setattr(self._target, name, value)
@@ -344,18 +440,52 @@ class Auditor(AuditorMixin):
         self.__dict__.update(state)
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            return getattr(self._target, name)
+        # Prevent recursion if _target is missing
+        if name == "_target":
+            raise AttributeError("_target not initialized")
 
-        attr = getattr(self._target, name)
+        # Safely access _target
+        try:
+            target = object.__getattribute__(self, "_target")
+        except AttributeError:
+             raise AttributeError("_target not initialized")
+
+        # Recursion Guard: If target is literally self, we are doomed
+        if target is self:
+             raise RuntimeError(f"Auditor _target is self (Infinite Recursion). ID: {id(self)}")
+
+        # Double check for loop
+        if isinstance(target, Auditor) and target._target is self:
+             raise RuntimeError("Auditor loop detected (A->B->A)")
+
+        if name.startswith("_"):
+            return getattr(target, name)
+
+        try:
+            # If target is an Auditor itself (which shouldn't happen but checking), unwrap it
+            if isinstance(target, Auditor):
+                 target = target._target
+
+            # Use object.__getattribute__ where possible to reduce recursion risk
+            attr = getattr(target, name)
+        except AttributeError:
+            # Re-raise to avoid endless loops if attributes are missing
+            raise
+        except RecursionError:
+             # If we hit recursion error during getattr, abort
+             raise AttributeError(f"RecursionError accessing {name}")
 
         if isinstance(attr, type):
-            # Only wrap main data structures to avoid MRO issues with internal classes like Index
-            if attr.__name__ in ("DataFrame", "Series"):
+            # Check configured audit classes
+            from .session import TraceSession
+            session = TraceSession.get_active_session()
+            if session and session.should_audit_class(attr.__name__):
                 return self._create_class_proxy(attr)
             return attr
 
         if callable(attr):
+            if name in ("iloc", "loc", "at", "iat"):
+                 return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
             return self._wrap_callable(attr, name)
 
         return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
@@ -405,47 +535,21 @@ class Auditor(AuditorMixin):
 
     # --- Proxy Dunder Methods ---
 
-    def __getitem__(self, key):
-        return self._wrap_result(self._target[self._unwrap(key)])
+    def __str__(self):
+        # Use object.__getattribute__ to avoid recursion via __getattr__
+        target = object.__getattribute__(self, "_target")
+        return str(target)
 
-    def __setitem__(self, key, value):
-        key = self._unwrap(key)
-        value = self._unwrap(value)
+    def __repr__(self):
+        return f"<Auditor({self._name}) wrapping {self._target}>"
 
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        try:
-            self._target[key] = value
-            if session:
-                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None)
-        except Exception as e:
-            if session:
-                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None, error=e)
-            raise
-
-    def __delitem__(self, key):
-        key = self._unwrap(key)
-
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        try:
-            del self._target[key]
-            if session:
-                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None)
-        except Exception as e:
-            if session:
-                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None, error=e)
-            raise
-
-    def __len__(self):
-        return len(self._target)
-
-    def __iter__(self):
-        return iter(self._target)
+    def __hash__(self):
+        return hash(self._target)
 
     def __bool__(self):
         return bool(self._target)
 
+    # Note: We must implement basic lifecycle methods manually or via generator
     def __enter__(self):
         return self._wrap_result(self._target.__enter__(), f"{self._name}.__enter__")
 
@@ -461,143 +565,108 @@ class Auditor(AuditorMixin):
     async def __anext__(self):
         return self._wrap_result(await self._target.__anext__(), f"{self._name}.__anext__")
 
-    def __str__(self):
-        return str(self._target)
+    # --- Dynamic Operator Generation ---
+    # We dynamically generate operator methods to ensure consistent logging
+    # and behavior across all proxied operations.
 
-    def __add__(self, other):
-        return self._wrap_result(self._target + self._unwrap(other), f"{self._name} + {other}")
+    def _make_operator(op_name, is_inplace=False, is_reverse=False, is_unary=False):
+        def wrapper(self, *args):
+            from .session import TraceSession
+            session = TraceSession.get_active_session()
 
-    def __iadd__(self, other):
-        return self._apply_inplace(operator.iadd, "__iadd__", other)
+            unwrapped_args = tuple(self._unwrap(a) for a in args)
 
-    def __sub__(self, other):
-        return self._wrap_result(self._target - self._unwrap(other), f"{self._name} - {other}")
+            # Resolve the operator function
+            if hasattr(operator, op_name):
+                 op_func = getattr(operator, op_name)
+            elif hasattr(self._target, op_name):
+                 # Fallback for things like __rshift__ if operator module doesn't match perfectly or for custom ops
+                 # Actually operator module maps nicely to dunders usually.
+                 # But let's rely on standard dunder invocation via getattr for non-operator module cases?
+                 # Better: just use getattr on target if not in operator?
+                 # No, 'operator.add(a, b)' is cleaner than 'a.__add__(b)'
+                 pass
 
-    def __isub__(self, other):
-        return self._apply_inplace(operator.isub, "__isub__", other)
+            # Manual mapping for some dunders to operator functions
+            op_map = {
+                '__add__': operator.add, '__sub__': operator.sub, '__mul__': operator.mul,
+                '__truediv__': operator.truediv, '__floordiv__': operator.floordiv, '__mod__': operator.mod,
+                '__pow__': operator.pow, '__lshift__': operator.lshift, '__rshift__': operator.rshift,
+                '__and__': operator.and_, '__xor__': operator.xor, '__or__': operator.or_,
+                '__matmul__': operator.matmul,
+                '__iadd__': operator.iadd, '__isub__': operator.isub, '__imul__': operator.imul,
+                '__itruediv__': operator.itruediv, '__ifloordiv__': operator.ifloordiv, '__imod__': operator.imod,
+                '__ipow__': operator.ipow, '__ilshift__': operator.ilshift, '__irshift__': operator.irshift,
+                '__iand__': operator.iand, '__ixor__': operator.ixor, '__ior__': operator.ior,
+                '__imatmul__': operator.imatmul,
+                '__lt__': operator.lt, '__le__': operator.le, '__eq__': operator.eq,
+                '__ne__': operator.ne, '__gt__': operator.gt, '__ge__': operator.ge,
+                '__neg__': operator.neg, '__pos__': operator.pos, '__abs__': operator.abs, '__invert__': operator.invert,
+                '__getitem__': operator.getitem, '__setitem__': operator.setitem, '__delitem__': operator.delitem
+            }
 
-    def __mul__(self, other):
-        return self._wrap_result(self._target * self._unwrap(other), f"{self._name} * {other}")
+            try:
+                if op_name in op_map:
+                    if is_reverse:
+                        # For r-ops, we swap: self is 'other' in the original expression
+                        # But wait, python calls __radd__(self, other).
+                        # Meaning 'other + self'.
+                        # So we want operator.add(other, self._target)
+                        res = op_map[op_name.replace('__r', '__')](unwrapped_args[0], self._target)
+                    else:
+                        res = op_map[op_name](self._target, *unwrapped_args)
+                else:
+                    # Fallback to direct method call
+                    func = getattr(self._target, op_name)
+                    res = func(*unwrapped_args)
 
-    def __imul__(self, other):
-        return self._apply_inplace(operator.imul, "__imul__", other)
+            except Exception as e:
+                if session:
+                    session.logger.log_call(f"{self._name}.{op_name}", args, {}, None, error=e)
+                raise
 
-    def __truediv__(self, other):
-        return self._wrap_result(self._target / self._unwrap(other), f"{self._name} / {other}")
+            if session:
+                log_res = res
+                if is_inplace:
+                    log_res = None
+                session.logger.log_call(f"{self._name}.{op_name}", args, {}, log_res)
 
-    def __itruediv__(self, other):
-        return self._apply_inplace(operator.itruediv, "__itruediv__", other)
+            return self._wrap_result(res, f"{self._name} {op_name} {args}")
+        return wrapper
 
-    def __floordiv__(self, other):
-        return self._wrap_result(self._target // self._unwrap(other), f"{self._name} // {other}")
+    # Apply operators
+    _ops_list = [
+        # Arithmetic
+        ('__add__', False, False, False), ('__sub__', False, False, False), ('__mul__', False, False, False),
+        ('__truediv__', False, False, False), ('__floordiv__', False, False, False), ('__mod__', False, False, False),
+        ('__pow__', False, False, False),
+        # Bitwise
+        ('__lshift__', False, False, False), ('__rshift__', False, False, False),
+        ('__and__', False, False, False), ('__xor__', False, False, False), ('__or__', False, False, False),
+        ('__matmul__', False, False, False),
+        # Reverse Arithmetic
+        ('__radd__', False, True, False), ('__rsub__', False, True, False), ('__rmul__', False, True, False),
+        ('__rtruediv__', False, True, False), ('__rfloordiv__', False, True, False), ('__rmod__', False, True, False),
+        ('__rpow__', False, True, False),
+        # Reverse Bitwise
+        ('__rlshift__', False, True, False), ('__rrshift__', False, True, False),
+        ('__rand__', False, True, False), ('__rxor__', False, True, False), ('__ror__', False, True, False),
+        ('__rmatmul__', False, True, False),
+        # Inplace
+        ('__iadd__', True, False, False), ('__isub__', True, False, False), ('__imul__', True, False, False),
+        ('__itruediv__', True, False, False), ('__ifloordiv__', True, False, False), ('__imod__', True, False, False),
+        ('__ipow__', True, False, False), ('__ilshift__', True, False, False), ('__irshift__', True, False, False),
+        ('__iand__', True, False, False), ('__ixor__', True, False, False), ('__ior__', True, False, False),
+        ('__imatmul__', True, False, False),
+        # Unary
+        ('__neg__', False, False, True), ('__pos__', False, False, True), ('__abs__', False, False, True), ('__invert__', False, False, True),
+        # Comparison
+        ('__lt__', False, False, False), ('__le__', False, False, False), ('__eq__', False, False, False),
+        ('__ne__', False, False, False), ('__gt__', False, False, False), ('__ge__', False, False, False),
+        # Container
+        ('__getitem__', False, False, False), ('__setitem__', False, False, False), ('__delitem__', False, False, False),
+        ('__len__', False, False, False), ('__iter__', False, False, False)
+    ]
 
-    def __ifloordiv__(self, other):
-        return self._apply_inplace(operator.ifloordiv, "__ifloordiv__", other)
-
-    def __mod__(self, other):
-        return self._wrap_result(self._target % self._unwrap(other), f"{self._name} % {other}")
-
-    def __imod__(self, other):
-        return self._apply_inplace(operator.imod, "__imod__", other)
-
-    def __radd__(self, other):
-        return self._wrap_result(self._unwrap(other) + self._target, f"{other} + {self._name}")
-
-    def __rsub__(self, other):
-        return self._wrap_result(self._unwrap(other) - self._target, f"{other} - {self._name}")
-
-    def __rmul__(self, other):
-        return self._wrap_result(self._unwrap(other) * self._target, f"{other} * {self._name}")
-
-    def __repr__(self):
-        return f"<Auditor({self._name}) wrapping {self._target}>"
-
-    def __matmul__(self, other):
-        return self._wrap_result(self._target @ self._unwrap(other), f"{self._name} @ {other}")
-
-    def __imatmul__(self, other):
-        return self._apply_inplace(operator.imatmul, "__imatmul__", other)
-
-    def __rmatmul__(self, other):
-        return self._wrap_result(self._unwrap(other) @ self._target, f"{other} @ {self._name}")
-
-    def __pow__(self, other):
-        return self._wrap_result(self._target ** self._unwrap(other), f"{self._name} ** {other}")
-
-    def __ipow__(self, other):
-        return self._apply_inplace(operator.ipow, "__ipow__", other)
-
-    def __rpow__(self, other):
-        return self._wrap_result(self._unwrap(other) ** self._target, f"{other} ** {self._name}")
-
-    def __and__(self, other):
-        return self._wrap_result(self._target & self._unwrap(other), f"{self._name} & {other}")
-
-    def __iand__(self, other):
-        return self._apply_inplace(operator.iand, "__iand__", other)
-
-    def __rand__(self, other):
-        return self._wrap_result(self._unwrap(other) & self._target, f"{other} & {self._name}")
-
-    def __or__(self, other):
-        return self._wrap_result(self._target | self._unwrap(other), f"{self._name} | {other}")
-
-    def __ior__(self, other):
-        return self._apply_inplace(operator.ior, "__ior__", other)
-
-    def __ror__(self, other):
-        return self._wrap_result(self._unwrap(other) | self._target, f"{other} | {self._name}")
-
-    def __xor__(self, other):
-        return self._wrap_result(self._target ^ self._unwrap(other), f"{self._name} ^ {other}")
-
-    def __ixor__(self, other):
-        return self._apply_inplace(operator.ixor, "__ixor__", other)
-
-    def __rxor__(self, other):
-        return self._wrap_result(self._unwrap(other) ^ self._target, f"{other} ^ {self._name}")
-
-    def __lshift__(self, other):
-        return self._wrap_result(self._target << self._unwrap(other), f"{self._name} << {other}")
-
-    def __ilshift__(self, other):
-        return self._apply_inplace(operator.ilshift, "__ilshift__", other)
-
-    def __rshift__(self, other):
-        return self._wrap_result(self._target >> self._unwrap(other), f"{self._name} >> {other}")
-
-    def __irshift__(self, other):
-        return self._apply_inplace(operator.irshift, "__irshift__", other)
-
-    def __invert__(self):
-        return self._wrap_result(~self._target, f"~{self._name}")
-
-    def __neg__(self):
-        return self._wrap_result(-self._target, f"-{self._name}")
-
-    def __pos__(self):
-        return self._wrap_result(+self._target, f"+{self._name}")
-
-    def __abs__(self):
-        return self._wrap_result(abs(self._target), f"abs({self._name})")
-
-    def __eq__(self, other):
-        return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
-
-    def __hash__(self):
-        return hash(self._target)
-
-    def __ne__(self, other):
-        return self._wrap_result(self._target != self._unwrap(other), f"{self._name} != {other}")
-
-    def __lt__(self, other):
-        return self._wrap_result(self._target < self._unwrap(other), f"{self._name} < {other}")
-
-    def __le__(self, other):
-        return self._wrap_result(self._target <= self._unwrap(other), f"{self._name} <= {other}")
-
-    def __gt__(self, other):
-        return self._wrap_result(self._target > self._unwrap(other), f"{self._name} > {other}")
-
-    def __ge__(self, other):
-        return self._wrap_result(self._target >= self._unwrap(other), f"{self._name} >= {other}")
+    for op_name, is_inplace, is_reverse, is_unary in _ops_list:
+        locals()[op_name] = _make_operator(op_name, is_inplace, is_reverse, is_unary)

@@ -47,7 +47,8 @@ class TraceSession:
         capture_git: bool = True,
         allow_ephemeral: bool = False,
         custom_input_triggers: Optional[List[str]] = None,
-        custom_output_triggers: Optional[List[str]] = None
+        custom_output_triggers: Optional[List[str]] = None,
+        audit_classes: Optional[List[str]] = None
     ):
         """
         Initialize the TraceSession.
@@ -67,6 +68,8 @@ class TraceSession:
             allow_ephemeral: If True, allows ephemeral keys even in strict mode.
             custom_input_triggers: List of method substrings (e.g. "load_my_data") to trigger input hashing.
             custom_output_triggers: List of method substrings (e.g. "export_stuff") to trigger output hashing.
+            audit_classes: List of class names to audit constructors for (e.g. "DataFrame", "*").
+                           Defaults to ["DataFrame", "Series"].
         """
         self.filename = filename
 
@@ -91,6 +94,7 @@ class TraceSession:
         self.capture_git = capture_git
         self.custom_input_triggers = custom_input_triggers or []
         self.custom_output_triggers = custom_output_triggers or []
+        self.audit_classes = audit_classes if audit_classes is not None else ["DataFrame", "Series"]
         self.logger = Logger(light_mode=light_mode, strict=strict)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
@@ -142,6 +146,14 @@ class TraceSession:
                 if finder._should_audit(module_name):
                     return True
         return False
+
+    def should_audit_class(self, class_name: str) -> bool:
+        """
+        Check if a class should be audited.
+        """
+        if "*" in self.audit_classes:
+            return True
+        return class_name in self.audit_classes
 
     def __enter__(self) -> 'TraceSession':
         if TraceSession._active_session.get() is not None:
