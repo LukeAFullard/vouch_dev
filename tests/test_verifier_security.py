@@ -44,11 +44,64 @@ class TestVerifierSecurity(unittest.TestCase):
         verifier = Verifier(self.vch_path)
 
         # Test strict=False
-        # This currently returns True (PASS) which is the bug.
-        # We assert False because we WANT it to fail.
         result = verifier.verify(strict=False)
 
         self.assertFalse(result, "Verification passed despite invalid timestamp in Normal Mode!")
+
+    @patch("vouch.verifier.CryptoManager")
+    @patch("vouch.timestamp.TimestampClient")
+    def test_trusted_key_verification(self, MockTSClient, MockCrypto):
+        """
+        Security Test: Verify that trusted_public_key_path uses the provided key,
+        not the bundled key.
+        """
+        self.create_dummy_vch()
+
+        # Mock loaded keys
+        mock_bundled_key = MagicMock()
+        mock_trusted_key = MagicMock()
+
+        # We need side_effect to return different keys based on path
+        def load_key_side_effect(path):
+            if "trusted" in path:
+                return mock_trusted_key
+            return mock_bundled_key
+
+        MockCrypto.load_public_key.side_effect = load_key_side_effect
+        MockCrypto.verify_file.return_value = None
+
+        # Mock timestamp verification to pass
+        MockTSClient.return_value.verify_timestamp.return_value = True
+
+        verifier = Verifier(self.vch_path)
+
+        # Create a dummy trusted key file
+        trusted_key_path = os.path.join(self.temp_dir, "trusted.pem")
+        with open(trusted_key_path, "w") as f:
+            f.write("TRUSTED")
+
+        # 1. Verify WITH trusted key
+        result = verifier.verify(trusted_public_key_path=trusted_key_path)
+
+        self.assertTrue(result)
+
+        # Ensure verification used the TRUSTED key, not the bundled key
+        # verify_file called 4 times (log, artifacts, env, git)
+        # We check the first call (for audit_log.json)
+        args, _ = MockCrypto.verify_file.call_args_list[0]
+        used_key = args[0]
+        self.assertEqual(used_key, mock_trusted_key, "Verification did not use the trusted key!")
+
+    @patch("vouch.verifier.CryptoManager")
+    def test_trusted_key_missing_fails(self, MockCrypto):
+        """Test failure when trusted key file is missing"""
+        self.create_dummy_vch()
+        verifier = Verifier(self.vch_path)
+
+        # Verify with non-existent key
+        result = verifier.verify(trusted_public_key_path="/non/existent/path")
+
+        self.assertFalse(result, "Verification should fail if trusted key is missing")
 
 if __name__ == "__main__":
     unittest.main()

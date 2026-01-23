@@ -5,24 +5,33 @@ import vouch
 from vouch.auditor import Auditor
 import os
 
-# Create a dummy module for cross-module test
-with open("tests/dummy_utils.py", "w") as f:
-    f.write("import pandas as pd\n")
-    f.write("def load_data():\n")
-    f.write("    return pd.DataFrame({'a': [1]})\n")
-
-import tests.dummy_utils as dummy_utils
+# No global setup needed
 
 def test_cross_module_imports():
-    # Limitation 1 fix verification
-    # Start a session
-    with vouch.start(filename="test_fixes.vch", allow_ephemeral=True):
-        # dummy_utils.pd should be wrapped
-        assert isinstance(dummy_utils.pd, Auditor), "Cross-module imports should be patched"
+    # Limitation 1 fix verification using standard library (json) to avoid deps
 
-        # Calling function should work and use wrapped pandas
-        df = dummy_utils.load_data()
-        assert isinstance(df, Auditor) or isinstance(df, pd.DataFrame)
+    # Rewrite dummy_utils to use json
+    with open("tests/dummy_utils_json.py", "w") as f:
+        f.write("import json\n")
+        f.write("def parse(s):\n")
+        f.write("    return json.loads(s)\n")
+
+    import tests.dummy_utils_json as dummy_json
+
+    try:
+        with vouch.start(filename="test_fixes.vch", allow_ephemeral=True, targets=["json"]):
+            # Check if json module in dummy_json is wrapped
+            # This is the core verification: did we patch the global in that module?
+            assert isinstance(dummy_json.json, Auditor), "Cross-module import (json) should be patched"
+
+            res = dummy_json.parse('{"a": 1}')
+
+            # Result (dict) is not wrapped because it's a builtin, but correctness is checked
+            assert res == {"a": 1}
+
+    finally:
+        if os.path.exists("tests/dummy_utils_json.py"):
+            os.remove("tests/dummy_utils_json.py")
 
 def test_cross_library_returns():
     # Limitation 2 fix verification

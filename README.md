@@ -80,6 +80,13 @@ is_valid = vouch.verify("audit_20231027_1000.vch")
 vouch verify audit_20231027_1000.vch
 ```
 
+**Secure Verification (Recommended):**
+To prove the identity of the signer, provide their trusted public key:
+
+```bash
+vouch verify audit_20231027_1000.vch --public-key analyst_id_rsa.pub
+```
+
 ## Advanced Usage
 
 ### Audit Everything (Wildcard)

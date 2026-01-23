@@ -49,7 +49,7 @@ class TraceSession:
         custom_input_triggers: Optional[List[str]] = None,
         custom_output_triggers: Optional[List[str]] = None,
         audit_classes: Optional[List[str]] = None
-    ):
+    ) -> None:
         """
         Initialize the TraceSession.
 
