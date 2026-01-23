@@ -60,6 +60,22 @@ class StableJSONEncoder(json.JSONEncoder):
                      except (TypeError, ValueError):
                         # Fallback if __dict__ is not iterable
                         return str(obj.__dict__)
+
+                 # Try to use __slots__
+                 if hasattr(obj, "__slots__"):
+                     try:
+                         data = {}
+                         for slot in obj.__slots__:
+                             if hasattr(obj, slot):
+                                 data[slot] = getattr(obj, slot)
+                         return data
+                     except Exception:
+                         pass
+
+                 msg = f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher."
+                 if self.raise_error:
+                      raise ValueError(msg)
+
                  return f"<Unstable: {type(obj).__name__}>"
 
             return s
@@ -160,10 +176,24 @@ class Hasher:
                      except Exception:
                          pass # Fallback to warning
 
+                 # Try to use __slots__
+                 if hasattr(obj, "__slots__"):
+                     try:
+                         data = {}
+                         for slot in obj.__slots__:
+                             if hasattr(obj, slot):
+                                 data[slot] = getattr(obj, slot)
+                         return Hasher.hash_object(data, raise_error=raise_error)
+                     except Exception:
+                         pass
+
                  msg = f"Unstable hash for {type(obj)}: Default repr contains memory address. Use light_mode or register a custom hasher."
                  if raise_error:
                      raise ValueError(msg)
                  logger.warning(msg)
+
+                 # Return a stable string placeholder instead of the unstable repr
+                 s = f"<Unstable: {type(obj).__name__}>"
 
             hasher = hashlib.sha256()
             hasher.update(s.encode('utf-8'))
