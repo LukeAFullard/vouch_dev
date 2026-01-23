@@ -83,6 +83,38 @@ class AuditorMixin:
 
         return result
 
+    def _redact_arguments(self, func, args, kwargs):
+        """
+        Helper to redact sensitive arguments based on session configuration.
+        Returns (redacted_args, redacted_kwargs).
+        """
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+
+        if not session or not session.redact_args:
+            return args, kwargs
+
+        try:
+            sig = inspect.signature(func)
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+
+            # Modify bound.arguments in place
+            for name in list(bound.arguments.keys()):
+                if name in session.redact_args:
+                    bound.arguments[name] = "<REDACTED>"
+
+            return bound.args, bound.kwargs
+
+        except Exception as e:
+            # Fallback if signature binding fails (e.g. C functions)
+            # Try to redact kwargs at least
+            new_kwargs = kwargs.copy()
+            for k in kwargs:
+                if k in session.redact_args:
+                    new_kwargs[k] = "<REDACTED>"
+            return args, new_kwargs
+
     def _hash_arguments(self, func_name, args, kwargs):
         """Helper to hash file paths found in arguments."""
         extra_hashes = {}
@@ -152,7 +184,8 @@ class AuditorMixin:
                 result = func(*args, **kwargs)
             except Exception as e:
                 if session:
-                    session.logger.log_call(full_name, args, kwargs, None, extra_hashes=input_hashes, error=e)
+                    log_args, log_kwargs = self._redact_arguments(func, args, kwargs)
+                    session.logger.log_call(full_name, log_args, log_kwargs, None, extra_hashes=input_hashes, error=e)
                 raise
 
             output_hashes = {}
@@ -168,18 +201,22 @@ class AuditorMixin:
 
             extra_hashes = {**input_hashes, **output_hashes}
 
+            log_args, log_kwargs = args, kwargs
+            if session:
+                 log_args, log_kwargs = self._redact_arguments(func, args, kwargs)
+
             if inspect.iscoroutine(result):
                 if session:
-                    session.logger.log_call(full_name, args, kwargs, "<coroutine>", extra_hashes)
-                return self._wrap_coroutine(result, full_name, args, kwargs)
+                    session.logger.log_call(full_name, log_args, log_kwargs, "<coroutine>", extra_hashes)
+                return self._wrap_coroutine(result, full_name, log_args, log_kwargs)
 
             if inspect.isgenerator(result):
                 if session:
-                    session.logger.log_call(full_name, args, kwargs, "<generator>", extra_hashes)
-                return self._wrap_generator(result, full_name, args, kwargs)
+                    session.logger.log_call(full_name, log_args, log_kwargs, "<generator>", extra_hashes)
+                return self._wrap_generator(result, full_name, log_args, log_kwargs)
 
             if session:
-                session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
+                session.logger.log_call(full_name, log_args, log_kwargs, result, extra_hashes)
 
             return self._wrap_result(result, name_hint=f"{full_name}()")
 
@@ -540,19 +577,21 @@ class Auditor(AuditorMixin):
             else:
                  full_name = f"{self._name}"
 
+            log_args, log_kwargs = self._redact_arguments(func, args, kwargs)
+
             if inspect.iscoroutine(result):
                 log_result = "<coroutine>"
             elif inspect.isgenerator(result):
                 log_result = "<generator>"
             else:
                 log_result = result
-            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
+            session.logger.log_call(full_name, log_args, log_kwargs, log_result, extra_hashes)
 
         if inspect.iscoroutine(result):
-            return self._wrap_coroutine(result, f"{self._name}()", args, kwargs) # Pass args for error logging
+            return self._wrap_coroutine(result, f"{self._name}()", log_args, log_kwargs) # Pass args for error logging
 
         if inspect.isgenerator(result):
-            return self._wrap_generator(result, f"{self._name}()", args, kwargs)
+            return self._wrap_generator(result, f"{self._name}()", log_args, log_kwargs)
 
         return self._wrap_result(result, name_hint=f"{self._name}()")
 

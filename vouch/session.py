@@ -48,7 +48,8 @@ class TraceSession:
         allow_ephemeral: bool = False,
         custom_input_triggers: Optional[List[str]] = None,
         custom_output_triggers: Optional[List[str]] = None,
-        audit_classes: Optional[List[str]] = None
+        audit_classes: Optional[List[str]] = None,
+        redact_args: Optional[List[str]] = None
     ) -> None:
         """
         Initialize the TraceSession.
@@ -70,6 +71,7 @@ class TraceSession:
             custom_output_triggers: List of method substrings (e.g. "export_stuff") to trigger output hashing.
             audit_classes: List of class names to audit constructors for (e.g. "DataFrame", "*").
                            Defaults to ["DataFrame", "Series"].
+            redact_args: List of argument names to be redacted from the logs (e.g. "password", "api_key").
         """
         self.filename = filename
 
@@ -95,6 +97,7 @@ class TraceSession:
         self.custom_input_triggers = custom_input_triggers or []
         self.custom_output_triggers = custom_output_triggers or []
         self.audit_classes = audit_classes if audit_classes is not None else ["DataFrame", "Series"]
+        self.redact_args = redact_args or []
         self.logger = Logger(light_mode=light_mode, strict=strict)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
