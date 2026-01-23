@@ -96,6 +96,10 @@ def _patch_loaded_modules(finder):
         # Skip internal/system modules
         if mod_name.startswith("vouch") or mod_name == "contextlib": continue
 
+        # Skip Auditor instances (we shouldn't patch proxies)
+        if isinstance(module, Auditor):
+            continue
+
         # Heuristic: Skip modules that don't look like user code
         if not hasattr(module, '__file__') or not module.__file__:
             continue

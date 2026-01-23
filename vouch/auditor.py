@@ -8,51 +8,23 @@ from .hasher import Hasher
 
 logger = logging.getLogger(__name__)
 
-class Auditor:
+# Cache for dynamic class wrappers to ensure identity preservation
+_class_proxy_cache = {}
+
+class AuditorMixin:
     """
-    A wrapper proxy that intercepts attribute access and function calls for auditing.
+    Shared auditing logic and helpers.
     """
-    def __init__(self, target: Any, name: Optional[str] = None):
-        """
-        Initialize the Auditor.
+    _name = "Unknown"
+    _target = None
 
-        Args:
-            target: The object to wrap.
-            name: The name of the object (used in logs).
-        """
-        # Prevent nested wrapping
-        if isinstance(target, Auditor):
-            self._target = target._target
-            # If name is not provided, inherit from existing wrapper?
-            # Or keep new name? Usually outer name is more relevant or same.
-            if name is None:
-                self._name = target._name
-            else:
-                self._name = name
-        else:
-            self._target = target
-            self._name = name or getattr(target, "__name__", str(target))
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in ("_target", "_name"):
-            super().__setattr__(name, value)
-        else:
-            setattr(self._target, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        if name in ("_target", "_name"):
-            super().__delattr__(name)
-        else:
-            delattr(self._target, name)
-
-    def __getstate__(self):
-        return self.__dict__
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
+    def __init__(self, *args, **kwargs):
+        # Consume arguments to prevent them reaching object.__init__
+        # This fixes MRO issues where wrapped classes pass args up the chain.
+        super().__init__()
 
     def _unwrap(self, obj: Any) -> Any:
-        if isinstance(obj, Auditor):
+        if isinstance(obj, AuditorMixin):
             return obj._target
         return obj
 
@@ -82,7 +54,6 @@ class Auditor:
             return result
 
         # Optimization: If the result is the target itself (chaining), return self.
-        # This preserves wrapper identity.
         if result is self._target:
             return self
 
@@ -112,87 +83,11 @@ class Auditor:
 
         return result
 
-    def __getattr__(self, name: str) -> Any:
-        # Pass through dunder methods or internal attributes to avoid issues
-        if name.startswith("_"):
-            return getattr(self._target, name)
-
-        attr = getattr(self._target, name)
-
-        # If it's a class/type, do NOT wrap it.
-        # Wrapping classes breaks pickling (identity check fails) and strict isinstance checks.
-        # This means constructor calls (e.g. pd.DataFrame()) are not intercepted,
-        # but the resulting objects are compatible with pickle and type checks.
-        if isinstance(attr, type):
-            return attr
-
-        # If it's a callable (and not a class), wrap it
-        if callable(attr):
-            return self._wrap_callable(attr, name)
-
-        # Recursively wrap attributes that are part of the library (heuristic)
-        # Use _wrap_result logic to avoid wrapping primitives/builtins
-        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
-
-    def __call__(self, *args, **kwargs):
-        """
-        Support calling the wrapped object (e.g. for class constructors or functors).
-        """
-        func = self._target
-        func_name = self._name
-
-        # Reuse wrap_callable logic inline
-        args = tuple(self._unwrap(a) for a in args)
-        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
-
-        # Inputs hashing
-        input_hashes = {}
-        if self._should_hash_inputs(func_name):
-             input_hashes = self._hash_arguments(func_name, args, kwargs)
-
-        result = func(*args, **kwargs)
-
-        # Outputs hashing
-        output_hashes = {}
-        if self._should_hash_outputs(func_name):
-             output_hashes = self._hash_arguments(func_name, args, kwargs)
-
-        extra_hashes = {**input_hashes, **output_hashes}
-
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        if session:
-            # If it's a class constructor, log it as such
-            if isinstance(self._target, type):
-                 full_name = f"{self._name}.__init__" # Approximate
-            else:
-                 full_name = f"{self._name}"
-
-            if inspect.iscoroutine(result):
-                log_result = "<coroutine>"
-            elif inspect.isgenerator(result):
-                log_result = "<generator>"
-            else:
-                log_result = result
-            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
-
-        # Handle Async Coroutines
-        if inspect.iscoroutine(result):
-            return self._wrap_coroutine(result, f"{self._name}()")
-
-        # Handle Generators
-        if inspect.isgenerator(result):
-            return self._wrap_generator(result, f"{self._name}()")
-
-        return self._wrap_result(result, name_hint=f"{self._name}()")
-
     def _hash_arguments(self, func_name, args, kwargs):
         """Helper to hash file paths found in arguments."""
         extra_hashes = {}
         # Naive implementation: check arg[0] and specific kwargs
-        # This covers pandas.read_csv(filepath) and df.to_csv(filepath)
 
-        # Check first positional arg
         if args and isinstance(args[0], str) and os.path.exists(args[0]):
             try:
                 file_hash = Hasher.hash_file(args[0])
@@ -211,7 +106,6 @@ class Auditor:
                      raise
                 logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
-        # Check common kwargs for file paths
         for key, val in kwargs.items():
                 if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and isinstance(val, str) and os.path.exists(val):
                     try:
@@ -235,11 +129,9 @@ class Auditor:
     def _wrap_callable(self, func: Callable, func_name: str) -> Callable:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Unwrap arguments if they are Auditors
             args = tuple(self._unwrap(a) for a in args)
             kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
 
-            # --- Pre-execution Hashing (Inputs) ---
             input_hashes = {}
             try:
                 if self._should_hash_inputs(func_name):
@@ -249,23 +141,20 @@ class Auditor:
                 session = TraceSession.get_active_session()
                 if session and session.strict:
                     raise
-                pass # Don't fail audit if hashing fails
+                pass
 
             full_name = f"{self._name}.{func_name}"
 
             from .session import TraceSession
             session = TraceSession.get_active_session()
 
-            # --- Execute ---
             try:
                 result = func(*args, **kwargs)
             except Exception as e:
-                # Log exception
                 if session:
                     session.logger.log_call(full_name, args, kwargs, None, extra_hashes=input_hashes, error=e)
                 raise
 
-            # --- Post-execution Hashing (Outputs) ---
             output_hashes = {}
             try:
                 if self._should_hash_outputs(func_name):
@@ -277,23 +166,18 @@ class Auditor:
                     raise
                 pass
 
-            # Combine hashes
             extra_hashes = {**input_hashes, **output_hashes}
 
-            # --- Deep Wrapping Logic ---
-            # Handle Async Coroutines
             if inspect.iscoroutine(result):
                 if session:
                     session.logger.log_call(full_name, args, kwargs, "<coroutine>", extra_hashes)
                 return self._wrap_coroutine(result, full_name, args, kwargs)
 
-            # Handle Generators
             if inspect.isgenerator(result):
                 if session:
                     session.logger.log_call(full_name, args, kwargs, "<generator>", extra_hashes)
                 return self._wrap_generator(result, full_name, args, kwargs)
 
-            # Log success
             if session:
                 session.logger.log_call(full_name, args, kwargs, result, extra_hashes)
 
@@ -302,13 +186,10 @@ class Auditor:
         return wrapper
 
     async def _wrap_coroutine(self, coro, name_hint, args, kwargs):
-        """Wrapper for async functions (coroutines)."""
         from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
             result = await coro
-            # We could log success here too, but it might be noisy.
-            # Ideally we link it to original call.
             return self._wrap_result(result, name_hint=f"{name_hint} (async)")
         except Exception as e:
             if session:
@@ -316,7 +197,6 @@ class Auditor:
             raise
 
     def _wrap_generator(self, gen, name_hint, args, kwargs):
-        """Wrapper for generators."""
         from .session import TraceSession
         session = TraceSession.get_active_session()
         try:
@@ -327,50 +207,349 @@ class Auditor:
                 session.logger.log_call(f"{name_hint} (generator)", args, kwargs, None, error=e)
             raise
 
+    def _apply_inplace(self, op, op_name, other):
+        other_val = self._unwrap(other)
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+
+        try:
+            res = op(self._target, other_val)
+        except Exception as e:
+            if session:
+                session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None, error=e)
+            raise
+
+        if res is self._target:
+             if session:
+                 session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None)
+             return self
+
+        return self._wrap_result(res, f"{self._name} {op_name} {other}")
+
+    def _create_class_proxy(self, target_cls):
+        """
+        Creates a dynamic subclass of target_cls that mixes in Auditor functionality.
+        This allows objects created via the constructor to be audited while failing isinstance checks.
+        """
+        if target_cls in _class_proxy_cache:
+            return _class_proxy_cache[target_cls]
+
+        # Define the wrapper class
+        # It inherits from target_cls (for isinstance) and AuditorMixin (for functionality)
+        # Note: We do NOT inherit from Auditor to avoid __init__ MRO conflict
+        class AuditedWrapper(target_cls, AuditorMixin):
+            def __init__(self, *args, **kwargs):
+                # Setup Auditor state
+                object.__setattr__(self, "_target", self)
+                object.__setattr__(self, "_name", f"{target_cls.__name__}(...)")
+
+                # Call original init
+                try:
+                    target_cls.__init__(self, *args, **kwargs)
+                except TypeError as e:
+                    # Sometimes wrapper classes confuse MRO or __init__ logic.
+                    # Fallback or re-raise
+                    raise TypeError(f"Failed to initialize wrapped class {target_cls.__name__}: {e}") from e
+
+            def __setattr__(self, name, value):
+                if name in ("_target", "_name"):
+                    object.__setattr__(self, name, value)
+                    return
+
+                if hasattr(target_cls, "__setattr__"):
+                    target_cls.__setattr__(self, name, value)
+                else:
+                    object.__setattr__(self, name, value)
+
+            def __getattribute__(self, name):
+                # Avoid recursion for internal lookups
+                if name.startswith("_") or name in (
+                    "match", "search",
+                    "_target", "_name", "_unwrap", "_wrap_result",
+                    "_should_hash_inputs", "_should_hash_outputs", "_hash_arguments",
+                    "_wrap_callable", "_wrap_coroutine", "_wrap_generator", "_apply_inplace",
+                    "_create_class_proxy"
+                ):
+                    return object.__getattribute__(self, name)
+
+                # Delegate to super class (MRO)
+                val = super().__getattribute__(name)
+
+                if callable(val):
+                    # Special handling for pandas indexers which are callable but mainly used via __getitem__
+                    if name in ("iloc", "loc", "at", "iat"):
+                        # Wrap it so we audit __getitem__
+                        wrapper_res = object.__getattribute__(self, "_wrap_result")
+                        return wrapper_res(val, name_hint=f"{self._name}.{name}")
+
+                    # Wrap callable using self._wrap_callable
+                    # self._wrap_callable is inherited from AuditorMixin
+                    wrapper_func = object.__getattribute__(self, "_wrap_callable")
+                    return wrapper_func(val, name)
+
+                return val
+
+            def __repr__(self):
+                # Ensure we don't recurse if target_cls.__repr__ uses something we hook
+                # Usually safely delegating to super() is fine
+                return super().__repr__()
+
+        # --- Dynamic Operator Overloading ---
+        # We inject operator methods into AuditedWrapper to ensure operations like
+        # df + 1 are intercepted and logged.
+
+        def make_operator(op_name, is_inplace=False):
+            def wrapper(self, *args):
+                from .session import TraceSession
+                session = TraceSession.get_active_session()
+
+                # Unwrap args
+                unwrapped_args = tuple(self._unwrap(a) for a in args)
+
+                try:
+                    # Resolve method via MRO to ensure we get the correct implementation
+                    # We start search from target_cls (skipping self/AuditedWrapper)
+
+                    func = None
+                    # Use target_cls.mro() which includes target_cls and its bases
+                    for cls in target_cls.mro():
+                        if op_name in cls.__dict__:
+                            func = cls.__dict__[op_name]
+                            break
+
+                    if func is None:
+                         # Fallback to object (common for __eq__, __ne__) if not in MRO of target_cls
+                         # (though target_cls MRO usually ends in object)
+                         func = getattr(object, op_name, None)
+
+                    if func is None:
+                        return NotImplemented
+
+                    # Invoke the function
+                    if hasattr(func, '__get__'):
+                         # Bind to self if descriptor
+                         bound_method = func.__get__(self, target_cls)
+                         res = bound_method(*unwrapped_args)
+                    else:
+                         res = func(self, *unwrapped_args)
+
+                except Exception as e:
+                    if session:
+                        session.logger.log_call(f"{self._name}.{op_name}", args, {}, None, error=e)
+                    raise
+
+                if session:
+                    # Capture result representation logic
+                    log_res = res
+                    if is_inplace:
+                        log_res = None # Avoid logging huge object if it's just self
+
+                    session.logger.log_call(f"{self._name}.{op_name}", args, {}, log_res)
+
+                if is_inplace:
+                    return self
+
+                # Log result
+                desc = f"{self._name} {op_name} {args}"
+                # Ensure we use AuditorMixin._wrap_result bound to self
+                if hasattr(self, "_wrap_result"):
+                     return self._wrap_result(res, name_hint=desc)
+                return res
+            return wrapper
+
+        ops = [
+            '__add__', '__sub__', '__mul__', '__truediv__', '__floordiv__', '__mod__',
+            '__pow__', '__lshift__', '__rshift__', '__and__', '__xor__', '__or__',
+            '__matmul__',
+            '__radd__', '__rsub__', '__rmul__', '__rtruediv__', '__rfloordiv__', '__rmod__',
+            '__rpow__', '__rlshift__', '__rrshift__', '__rand__', '__rxor__', '__ror__',
+            '__rmatmul__',
+            '__iadd__', '__isub__', '__imul__', '__itruediv__', '__ifloordiv__', '__imod__',
+            '__ipow__', '__ilshift__', '__irshift__', '__iand__', '__ixor__', '__ior__',
+            '__imatmul__',
+            '__neg__', '__pos__', '__abs__', '__invert__',
+            '__lt__', '__le__', '__eq__', '__ne__', '__gt__', '__ge__',
+            # Container ops
+            '__getitem__', '__setitem__', '__delitem__', '__len__', '__iter__'
+        ]
+
+        for op in ops:
+            # Only wrap if the target class actually supports it (or object does)
+            # This prevents adding __len__ to things that don't support it, etc.
+            # However, for arithmetic operators, it's safer to add them if we want to support duck typing,
+            # but checking for existence in MRO is safer to avoid confusing python.
+
+            should_wrap = False
+            for cls in target_cls.mro():
+                if op in cls.__dict__:
+                    should_wrap = True
+                    break
+
+            if should_wrap:
+                 is_inplace = op.startswith("__i")
+                 setattr(AuditedWrapper, op, make_operator(op, is_inplace=is_inplace))
+
+        # Set metadata
+        AuditedWrapper.__name__ = f"Audited{target_cls.__name__}"
+        AuditedWrapper.__module__ = target_cls.__module__
+
+        _class_proxy_cache[target_cls] = AuditedWrapper
+        return AuditedWrapper
+
+
+class Auditor(AuditorMixin):
+    """
+    A wrapper proxy that intercepts attribute access and function calls for auditing.
+    """
+    def __init__(self, target: Any, name: Optional[str] = None):
+        if isinstance(target, Auditor):
+            self._target = target._target
+            if name is None:
+                self._name = target._name
+            else:
+                self._name = name
+        else:
+            self._target = target
+            self._name = name or getattr(target, "__name__", str(target))
+
+        # Sanity check
+        if self._target is self:
+             # This should be impossible in __init__ as self is new.
+             # Unless object.__new__ returned existing object? (Singleton?)
+             # Auditor inherits from object.
+             raise ValueError(f"Auditor target cannot be self. Target: {target}, Self: {self}")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in ("_target", "_name"):
+            # if name == "_target" and value is self:
+            #     raise RuntimeError("Attempting to set _target to self")
+            super().__setattr__(name, value)
+        else:
+            setattr(self._target, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in ("_target", "_name"):
+            super().__delattr__(name)
+        else:
+            delattr(self._target, name)
+
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+    def __getattr__(self, name: str) -> Any:
+        # Prevent recursion if _target is missing
+        if name == "_target":
+            raise AttributeError("_target not initialized")
+
+        # Safely access _target
+        try:
+            target = object.__getattribute__(self, "_target")
+        except AttributeError:
+             raise AttributeError("_target not initialized")
+
+        # Recursion Guard: If target is literally self, we are doomed
+        if target is self:
+             raise RuntimeError(f"Auditor _target is self (Infinite Recursion). ID: {id(self)}")
+
+        # Double check for loop
+        if isinstance(target, Auditor) and target._target is self:
+             raise RuntimeError("Auditor loop detected (A->B->A)")
+
+        if name.startswith("_"):
+            return getattr(target, name)
+
+        try:
+            # If target is an Auditor itself (which shouldn't happen but checking), unwrap it
+            if isinstance(target, Auditor):
+                 target = target._target
+
+            # Use object.__getattribute__ where possible to reduce recursion risk
+            attr = getattr(target, name)
+        except AttributeError:
+            # Re-raise to avoid endless loops if attributes are missing
+            raise
+        except RecursionError:
+             # If we hit recursion error during getattr, abort
+             raise AttributeError(f"RecursionError accessing {name}")
+
+        if isinstance(attr, type):
+            # Check configured audit classes
+            from .session import TraceSession
+            session = TraceSession.get_active_session()
+            if session and session.should_audit_class(attr.__name__):
+                return self._create_class_proxy(attr)
+            return attr
+
+        if callable(attr):
+            if name in ("iloc", "loc", "at", "iat"):
+                 return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
+            return self._wrap_callable(attr, name)
+
+        return self._wrap_result(attr, name_hint=f"{self._name}.{name}")
+
+    def __call__(self, *args, **kwargs):
+        func = self._target
+        func_name = self._name
+
+        args = tuple(self._unwrap(a) for a in args)
+        kwargs = {k: self._unwrap(v) for k, v in kwargs.items()}
+
+        input_hashes = {}
+        if self._should_hash_inputs(func_name):
+             input_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        result = func(*args, **kwargs)
+
+        output_hashes = {}
+        if self._should_hash_outputs(func_name):
+             output_hashes = self._hash_arguments(func_name, args, kwargs)
+
+        extra_hashes = {**input_hashes, **output_hashes}
+
+        from .session import TraceSession
+        session = TraceSession.get_active_session()
+        if session:
+            if isinstance(self._target, type):
+                 full_name = f"{self._name}.__init__"
+            else:
+                 full_name = f"{self._name}"
+
+            if inspect.iscoroutine(result):
+                log_result = "<coroutine>"
+            elif inspect.isgenerator(result):
+                log_result = "<generator>"
+            else:
+                log_result = result
+            session.logger.log_call(full_name, args, kwargs, log_result, extra_hashes)
+
+        if inspect.iscoroutine(result):
+            return self._wrap_coroutine(result, f"{self._name}()", args, kwargs) # Pass args for error logging
+
+        if inspect.isgenerator(result):
+            return self._wrap_generator(result, f"{self._name}()", args, kwargs)
+
+        return self._wrap_result(result, name_hint=f"{self._name}()")
+
     # --- Proxy Dunder Methods ---
 
-    def __getitem__(self, key):
-        return self._wrap_result(self._target[self._unwrap(key)])
+    def __str__(self):
+        # Use object.__getattribute__ to avoid recursion via __getattr__
+        target = object.__getattribute__(self, "_target")
+        return str(target)
 
-    def __setitem__(self, key, value):
-        key = self._unwrap(key)
-        value = self._unwrap(value)
+    def __repr__(self):
+        return f"<Auditor({self._name}) wrapping {self._target}>"
 
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        try:
-            self._target[key] = value
-            if session:
-                # Log the modification
-                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None)
-        except Exception as e:
-            if session:
-                session.logger.log_call(f"{self._name}.__setitem__", [key, value], {}, None, error=e)
-            raise
-
-    def __delitem__(self, key):
-        key = self._unwrap(key)
-
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
-        try:
-            del self._target[key]
-            if session:
-                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None)
-        except Exception as e:
-            if session:
-                session.logger.log_call(f"{self._name}.__delitem__", [key], {}, None, error=e)
-            raise
-
-    def __len__(self):
-        return len(self._target)
-
-    def __iter__(self):
-        return iter(self._target)
+    def __hash__(self):
+        return hash(self._target)
 
     def __bool__(self):
         return bool(self._target)
 
+    # Note: We must implement basic lifecycle methods manually or via generator
     def __enter__(self):
         return self._wrap_result(self._target.__enter__(), f"{self._name}.__enter__")
 
@@ -386,172 +565,108 @@ class Auditor:
     async def __anext__(self):
         return self._wrap_result(await self._target.__anext__(), f"{self._name}.__anext__")
 
-    def __str__(self):
-        return str(self._target)
+    # --- Dynamic Operator Generation ---
+    # We dynamically generate operator methods to ensure consistent logging
+    # and behavior across all proxied operations.
 
-    # In-place operators helper
-    def _apply_inplace(self, op, op_name, other):
-        other_val = self._unwrap(other)
-        from .session import TraceSession
-        session = TraceSession.get_active_session()
+    def _make_operator(op_name, is_inplace=False, is_reverse=False, is_unary=False):
+        def wrapper(self, *args):
+            from .session import TraceSession
+            session = TraceSession.get_active_session()
 
-        try:
-            res = op(self._target, other_val)
-        except Exception as e:
+            unwrapped_args = tuple(self._unwrap(a) for a in args)
+
+            # Resolve the operator function
+            if hasattr(operator, op_name):
+                 op_func = getattr(operator, op_name)
+            elif hasattr(self._target, op_name):
+                 # Fallback for things like __rshift__ if operator module doesn't match perfectly or for custom ops
+                 # Actually operator module maps nicely to dunders usually.
+                 # But let's rely on standard dunder invocation via getattr for non-operator module cases?
+                 # Better: just use getattr on target if not in operator?
+                 # No, 'operator.add(a, b)' is cleaner than 'a.__add__(b)'
+                 pass
+
+            # Manual mapping for some dunders to operator functions
+            op_map = {
+                '__add__': operator.add, '__sub__': operator.sub, '__mul__': operator.mul,
+                '__truediv__': operator.truediv, '__floordiv__': operator.floordiv, '__mod__': operator.mod,
+                '__pow__': operator.pow, '__lshift__': operator.lshift, '__rshift__': operator.rshift,
+                '__and__': operator.and_, '__xor__': operator.xor, '__or__': operator.or_,
+                '__matmul__': operator.matmul,
+                '__iadd__': operator.iadd, '__isub__': operator.isub, '__imul__': operator.imul,
+                '__itruediv__': operator.itruediv, '__ifloordiv__': operator.ifloordiv, '__imod__': operator.imod,
+                '__ipow__': operator.ipow, '__ilshift__': operator.ilshift, '__irshift__': operator.irshift,
+                '__iand__': operator.iand, '__ixor__': operator.ixor, '__ior__': operator.ior,
+                '__imatmul__': operator.imatmul,
+                '__lt__': operator.lt, '__le__': operator.le, '__eq__': operator.eq,
+                '__ne__': operator.ne, '__gt__': operator.gt, '__ge__': operator.ge,
+                '__neg__': operator.neg, '__pos__': operator.pos, '__abs__': operator.abs, '__invert__': operator.invert,
+                '__getitem__': operator.getitem, '__setitem__': operator.setitem, '__delitem__': operator.delitem
+            }
+
+            try:
+                if op_name in op_map:
+                    if is_reverse:
+                        # For r-ops, we swap: self is 'other' in the original expression
+                        # But wait, python calls __radd__(self, other).
+                        # Meaning 'other + self'.
+                        # So we want operator.add(other, self._target)
+                        res = op_map[op_name.replace('__r', '__')](unwrapped_args[0], self._target)
+                    else:
+                        res = op_map[op_name](self._target, *unwrapped_args)
+                else:
+                    # Fallback to direct method call
+                    func = getattr(self._target, op_name)
+                    res = func(*unwrapped_args)
+
+            except Exception as e:
+                if session:
+                    session.logger.log_call(f"{self._name}.{op_name}", args, {}, None, error=e)
+                raise
+
             if session:
-                session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None, error=e)
-            raise
+                log_res = res
+                if is_inplace:
+                    log_res = None
+                session.logger.log_call(f"{self._name}.{op_name}", args, {}, log_res)
 
-        # If it was in-place mutation (identity preserved)
-        if res is self._target:
-             if session:
-                 session.logger.log_call(f"{self._name}.{op_name}", [other], {}, None)
-             return self
+            return self._wrap_result(res, f"{self._name} {op_name} {args}")
+        return wrapper
 
-        # If it returned a new object (immutable target or copy), return wrapped result
-        return self._wrap_result(res, f"{self._name} {op_name} {other}")
+    # Apply operators
+    _ops_list = [
+        # Arithmetic
+        ('__add__', False, False, False), ('__sub__', False, False, False), ('__mul__', False, False, False),
+        ('__truediv__', False, False, False), ('__floordiv__', False, False, False), ('__mod__', False, False, False),
+        ('__pow__', False, False, False),
+        # Bitwise
+        ('__lshift__', False, False, False), ('__rshift__', False, False, False),
+        ('__and__', False, False, False), ('__xor__', False, False, False), ('__or__', False, False, False),
+        ('__matmul__', False, False, False),
+        # Reverse Arithmetic
+        ('__radd__', False, True, False), ('__rsub__', False, True, False), ('__rmul__', False, True, False),
+        ('__rtruediv__', False, True, False), ('__rfloordiv__', False, True, False), ('__rmod__', False, True, False),
+        ('__rpow__', False, True, False),
+        # Reverse Bitwise
+        ('__rlshift__', False, True, False), ('__rrshift__', False, True, False),
+        ('__rand__', False, True, False), ('__rxor__', False, True, False), ('__ror__', False, True, False),
+        ('__rmatmul__', False, True, False),
+        # Inplace
+        ('__iadd__', True, False, False), ('__isub__', True, False, False), ('__imul__', True, False, False),
+        ('__itruediv__', True, False, False), ('__ifloordiv__', True, False, False), ('__imod__', True, False, False),
+        ('__ipow__', True, False, False), ('__ilshift__', True, False, False), ('__irshift__', True, False, False),
+        ('__iand__', True, False, False), ('__ixor__', True, False, False), ('__ior__', True, False, False),
+        ('__imatmul__', True, False, False),
+        # Unary
+        ('__neg__', False, False, True), ('__pos__', False, False, True), ('__abs__', False, False, True), ('__invert__', False, False, True),
+        # Comparison
+        ('__lt__', False, False, False), ('__le__', False, False, False), ('__eq__', False, False, False),
+        ('__ne__', False, False, False), ('__gt__', False, False, False), ('__ge__', False, False, False),
+        # Container
+        ('__getitem__', False, False, False), ('__setitem__', False, False, False), ('__delitem__', False, False, False),
+        ('__len__', False, False, False), ('__iter__', False, False, False)
+    ]
 
-    # Arithmetic operators
-    def __add__(self, other):
-        return self._wrap_result(self._target + self._unwrap(other), f"{self._name} + {other}")
-
-    def __iadd__(self, other):
-        return self._apply_inplace(operator.iadd, "__iadd__", other)
-
-    def __sub__(self, other):
-        return self._wrap_result(self._target - self._unwrap(other), f"{self._name} - {other}")
-
-    def __isub__(self, other):
-        return self._apply_inplace(operator.isub, "__isub__", other)
-
-    def __mul__(self, other):
-        return self._wrap_result(self._target * self._unwrap(other), f"{self._name} * {other}")
-
-    def __imul__(self, other):
-        return self._apply_inplace(operator.imul, "__imul__", other)
-
-    def __truediv__(self, other):
-        return self._wrap_result(self._target / self._unwrap(other), f"{self._name} / {other}")
-
-    def __itruediv__(self, other):
-        return self._apply_inplace(operator.itruediv, "__itruediv__", other)
-
-    def __floordiv__(self, other):
-        return self._wrap_result(self._target // self._unwrap(other), f"{self._name} // {other}")
-
-    def __ifloordiv__(self, other):
-        return self._apply_inplace(operator.ifloordiv, "__ifloordiv__", other)
-
-    def __mod__(self, other):
-        return self._wrap_result(self._target % self._unwrap(other), f"{self._name} % {other}")
-
-    def __imod__(self, other):
-        return self._apply_inplace(operator.imod, "__imod__", other)
-
-    # Reverse arithmetic
-    def __radd__(self, other):
-        return self._wrap_result(self._unwrap(other) + self._target, f"{other} + {self._name}")
-
-    def __rsub__(self, other):
-        return self._wrap_result(self._unwrap(other) - self._target, f"{other} - {self._name}")
-
-    def __rmul__(self, other):
-        return self._wrap_result(self._unwrap(other) * self._target, f"{other} * {self._name}")
-
-    def __repr__(self):
-        return f"<Auditor({self._name}) wrapping {self._target}>"
-
-    # Matrix multiplication
-    def __matmul__(self, other):
-        return self._wrap_result(self._target @ self._unwrap(other), f"{self._name} @ {other}")
-
-    def __imatmul__(self, other):
-        return self._apply_inplace(operator.imatmul, "__imatmul__", other)
-
-    def __rmatmul__(self, other):
-        return self._wrap_result(self._unwrap(other) @ self._target, f"{other} @ {self._name}")
-
-    # Power
-    def __pow__(self, other):
-        return self._wrap_result(self._target ** self._unwrap(other), f"{self._name} ** {other}")
-
-    def __ipow__(self, other):
-        return self._apply_inplace(operator.ipow, "__ipow__", other)
-
-    def __rpow__(self, other):
-        return self._wrap_result(self._unwrap(other) ** self._target, f"{other} ** {self._name}")
-
-    # Bitwise operators
-    def __and__(self, other):
-        return self._wrap_result(self._target & self._unwrap(other), f"{self._name} & {other}")
-
-    def __iand__(self, other):
-        return self._apply_inplace(operator.iand, "__iand__", other)
-
-    def __rand__(self, other):
-        return self._wrap_result(self._unwrap(other) & self._target, f"{other} & {self._name}")
-
-    def __or__(self, other):
-        return self._wrap_result(self._target | self._unwrap(other), f"{self._name} | {other}")
-
-    def __ior__(self, other):
-        return self._apply_inplace(operator.ior, "__ior__", other)
-
-    def __ror__(self, other):
-        return self._wrap_result(self._unwrap(other) | self._target, f"{other} | {self._name}")
-
-    def __xor__(self, other):
-        return self._wrap_result(self._target ^ self._unwrap(other), f"{self._name} ^ {other}")
-
-    def __ixor__(self, other):
-        return self._apply_inplace(operator.ixor, "__ixor__", other)
-
-    def __rxor__(self, other):
-        return self._wrap_result(self._unwrap(other) ^ self._target, f"{other} ^ {self._name}")
-
-    def __lshift__(self, other):
-        return self._wrap_result(self._target << self._unwrap(other), f"{self._name} << {other}")
-
-    def __ilshift__(self, other):
-        return self._apply_inplace(operator.ilshift, "__ilshift__", other)
-
-    def __rshift__(self, other):
-        return self._wrap_result(self._target >> self._unwrap(other), f"{self._name} >> {other}")
-
-    def __irshift__(self, other):
-        return self._apply_inplace(operator.irshift, "__irshift__", other)
-
-    def __invert__(self):
-        return self._wrap_result(~self._target, f"~{self._name}")
-
-    # Unary operators
-    def __neg__(self):
-        return self._wrap_result(-self._target, f"-{self._name}")
-
-    def __pos__(self):
-        return self._wrap_result(+self._target, f"+{self._name}")
-
-    def __abs__(self):
-        return self._wrap_result(abs(self._target), f"abs({self._name})")
-
-    # Comparison
-    def __eq__(self, other):
-        return self._wrap_result(self._target == self._unwrap(other), f"{self._name} == {other}")
-
-    def __hash__(self):
-        return hash(self._target)
-
-    def __ne__(self, other):
-        return self._wrap_result(self._target != self._unwrap(other), f"{self._name} != {other}")
-
-    def __lt__(self, other):
-        return self._wrap_result(self._target < self._unwrap(other), f"{self._name} < {other}")
-
-    def __le__(self, other):
-        return self._wrap_result(self._target <= self._unwrap(other), f"{self._name} <= {other}")
-
-    def __gt__(self, other):
-        return self._wrap_result(self._target > self._unwrap(other), f"{self._name} > {other}")
-
-    def __ge__(self, other):
-        return self._wrap_result(self._target >= self._unwrap(other), f"{self._name} >= {other}")
+    for op_name, is_inplace, is_reverse, is_unary in _ops_list:
+        locals()[op_name] = _make_operator(op_name, is_inplace, is_reverse, is_unary)
