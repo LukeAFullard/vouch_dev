@@ -1,0 +1,7 @@
+cryptography
+pandas
+numpy
+asn1crypto
+ijson
+pyyaml
+pytest
