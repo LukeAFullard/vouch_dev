@@ -9,8 +9,13 @@ from vouch.hasher import Hasher
 
 class TestConcurrency(unittest.TestCase):
     def setUp(self):
-        self.output_file = tempfile.mktemp(suffix=".vch")
-        self.artifact_source = tempfile.mktemp()
+        # Use secure temporary file creation
+        fd, self.output_file = tempfile.mkstemp(suffix=".vch")
+        os.close(fd)
+        os.remove(self.output_file) # Vouch expects to create it
+
+        fd, self.artifact_source = tempfile.mkstemp()
+        os.close(fd)
         with open(self.artifact_source, "w") as f:
             f.write("A" * 10000) # 10KB data
 

@@ -8,7 +8,9 @@ import pandas as pd
 
 class TestIndexAudit(unittest.TestCase):
     def setUp(self):
-        self.output_file = tempfile.mktemp(suffix=".vch")
+        fd, self.output_file = tempfile.mkstemp(suffix=".vch")
+        os.close(fd)
+        os.remove(self.output_file)
 
     def tearDown(self):
         if os.path.exists(self.output_file):
