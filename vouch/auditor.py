@@ -481,6 +481,12 @@ class Auditor(AuditorMixin):
             session = TraceSession.get_active_session()
             if session and session.should_audit_class(attr.__name__):
                 return self._create_class_proxy(attr)
+
+            # Fallback: Wrap as Auditor (generic proxy)
+            # This preserves attribute access (like classmethods) which _wrap_callable destroys.
+            # We explicitly check for session to avoid wrapping everything if auditing is off (though Importer controls that).
+            if session:
+                return Auditor(attr, name=f"{self._name}.{name}")
             return attr
 
         if callable(attr):

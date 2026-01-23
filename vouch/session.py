@@ -130,6 +130,7 @@ class TraceSession:
         self._in_tracked_open = False
         self._thread_local = threading.local()
         self._finders = []
+        self._artifact_lock = threading.Lock()
 
     def register_finder(self, finder: Any) -> None:
         """Register a finder to check which modules should be audited."""
@@ -303,11 +304,13 @@ class TraceSession:
              else:
                 return
 
-        self.artifacts[arcname] = filepath
+        # Protect artifact map and capture with lock
+        with self._artifact_lock:
+            self.artifacts[arcname] = filepath
 
-        # Immediate capture if session is active
-        if self.temp_dir and os.path.exists(self.temp_dir):
-             self._safe_copy_artifact(arcname, filepath)
+            # Immediate capture if session is active
+            if self.temp_dir and os.path.exists(self.temp_dir):
+                 self._safe_copy_artifact(arcname, filepath)
 
     def track_file(self, filepath: str) -> None:
         """
