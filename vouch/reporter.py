@@ -89,6 +89,7 @@ class Reporter:
         # Safe getters
         python_ver = env.get('python_version', 'Unknown')
         platform = env.get('platform', 'Unknown')
+        gpu_info = env.get('gpu_info', 'N/A')
 
         rows = []
         for entry in log:
@@ -155,6 +156,7 @@ class Reporter:
         <div class="meta-grid">
             <div class="meta-item"><label>Python Version</label>{python_ver}</div>
             <div class="meta-item"><label>Platform</label>{platform}</div>
+            <div class="meta-item"><label>GPU</label>{gpu_info}</div>
         </div>
     </div>
 
@@ -193,6 +195,7 @@ class Reporter:
         # Safe getters
         python_ver = env.get('python_version', 'Unknown')
         platform = env.get('platform', 'Unknown')
+        gpu_info = env.get('gpu_info', 'N/A')
 
         lines = []
         lines.append(f"# Vouch Audit Report")
@@ -207,6 +210,7 @@ class Reporter:
         lines.append("## Environment")
         lines.append(f"- **Python Version:** `{python_ver}`")
         lines.append(f"- **Platform:** `{platform}`")
+        lines.append(f"- **GPU:** `{gpu_info}`")
         lines.append("")
 
         lines.append("## Artifacts")

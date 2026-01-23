@@ -448,11 +448,41 @@ class TraceSession:
         except Exception as e:
             blas_info = f"Error capturing NumPy config: {e}"
 
+        # Capture GPU info
+        gpu_info = "N/A"
+        try:
+            # Method 1: PyTorch (most reliable if installed)
+            # Check if it is actually loaded and not None (failed import).
+            # Note: If torch is installed but not imported by the user script, we skip this
+            # and fall back to nvidia-smi. This avoids importing heavy libraries unnecessarily.
+            if sys.modules.get('torch') is not None:
+                import torch
+                if torch.cuda.is_available():
+                    devices = []
+                    for i in range(torch.cuda.device_count()):
+                        devices.append(torch.cuda.get_device_name(i))
+                    gpu_info = ", ".join(devices)
+                else:
+                    gpu_info = "No CUDA devices found (PyTorch)"
+            # Method 2: nvidia-smi (subprocess)
+            elif shutil.which("nvidia-smi"):
+                 try:
+                     output = subprocess.check_output(
+                         ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                         timeout=2
+                     ).decode("utf-8").strip()
+                     gpu_info = ", ".join(output.split('\n'))
+                 except Exception:
+                     pass
+        except Exception as e:
+            gpu_info = f"Error capturing GPU info: {e}"
+
         env_info = {
             "vouch_version": vouch.__version__,
             "python_version": sys.version,
             "platform": sys.platform,
             "cpu_info": cpu_info,
+            "gpu_info": gpu_info,
             "blas_info": blas_info,
             "pip_freeze": freeze_output
         }
