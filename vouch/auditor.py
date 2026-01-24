@@ -691,6 +691,10 @@ class Auditor(AuditorMixin):
                 log_res = res
                 if is_inplace:
                     log_res = None
+                # Don't try to hash iterators/generators from __iter__/__reversed__
+                elif op_name in ("__iter__", "__reversed__", "__aiter__"):
+                    log_res = "<iterator>"
+
                 session.logger.log_call(f"{self._name}.{op_name}", args, {}, log_res)
 
             return self._wrap_result(res, f"{self._name} {op_name} {args}")
