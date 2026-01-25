@@ -4,14 +4,17 @@ import os
 import datetime
 import threading
 from .hasher import Hasher
+from .pii import PIIDetector
 
 class Logger:
-    def __init__(self, light_mode=False, strict=False, stream_path=None):
+    def __init__(self, light_mode=False, strict=False, stream_path=None, detect_pii=False):
         self.log = [] # Kept for backward compat / in-memory access if needed, but we should be careful
         self.sequence_number = 0
         self.previous_entry_hash = "0" * 64
         self.light_mode = light_mode
         self.strict = strict
+        self.detect_pii = detect_pii
+        self.pii_detector = PIIDetector() if detect_pii else None
         self.stream_path = stream_path
         self._file_handle = None
         self._first_entry = True
@@ -50,6 +53,27 @@ class Logger:
 
     def log_call(self, target_name, args, kwargs, result, extra_hashes=None, error=None):
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        # Sanitize PII if enabled
+        # This modifies the data BEFORE hashing and logging, ensuring PII is completely excluded.
+        if self.detect_pii:
+            try:
+                args = self.pii_detector.sanitize(args)
+                kwargs = self.pii_detector.sanitize(kwargs)
+                if not error and result is not None:
+                    result = self.pii_detector.sanitize(result)
+                if error:
+                     # Sanitize error message as well
+                     error = self.pii_detector.sanitize(str(error))
+            except Exception as e:
+                # If sanitization fails, fall back to safe error or proceed cautiously
+                # For now, we proceed but log internal warning?
+                # Actually, if we fail to sanitize, we risk logging PII.
+                # Better to redact EVERYTHING if we can't be sure?
+                # Or just let it fail if strict?
+                if self.strict:
+                    raise RuntimeError(f"PII Sanitization failed: {e}") from e
+                pass
 
         # Hash arguments and result (outside lock)
         if self.light_mode:

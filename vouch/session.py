@@ -49,7 +49,10 @@ class TraceSession:
         custom_input_triggers: Optional[List[str]] = None,
         custom_output_triggers: Optional[List[str]] = None,
         audit_classes: Optional[List[str]] = None,
-        redact_args: Optional[List[str]] = None
+        redact_args: Optional[List[str]] = None,
+        compliance_usage: Optional[str] = None,
+        user_info: Optional[Dict[str, Any]] = None,
+        detect_pii: bool = False
     ) -> None:
         """
         Initialize the TraceSession.
@@ -72,6 +75,9 @@ class TraceSession:
             audit_classes: List of class names to audit constructors for (e.g. "DataFrame", "*").
                            Defaults to ["DataFrame", "Series"].
             redact_args: List of argument names to be redacted from the logs (e.g. "password", "api_key").
+            compliance_usage: String tag for regulatory framework (e.g. "EU_AI_ART12").
+            user_info: Dictionary containing user metadata (e.g. {"name": "Alice", "id": "123"}).
+            detect_pii: If True, scans all logged arguments and results for PII (Email, IP, SSN) and sanitizes them.
         """
         self.filename = filename
 
@@ -98,7 +104,10 @@ class TraceSession:
         self.custom_output_triggers = custom_output_triggers or []
         self.audit_classes = audit_classes if audit_classes is not None else ["DataFrame", "Series"]
         self.redact_args = redact_args or []
-        self.logger = Logger(light_mode=light_mode, strict=strict)
+        self.compliance_usage = compliance_usage
+        self.user_info = user_info or {}
+        self.detect_pii = detect_pii
+        self.logger = Logger(light_mode=light_mode, strict=strict, detect_pii=detect_pii)
         self.temp_dir: Optional[str] = None
         self._ephemeral_key = None
 
@@ -183,7 +192,10 @@ class TraceSession:
                     "config": {
                         "strict": self.strict,
                         "tsa_url": self.tsa_url,
-                        "light_mode": self.light_mode
+                        "light_mode": self.light_mode,
+                        "detect_pii": self.detect_pii,
+                        "compliance_usage": self.compliance_usage,
+                        "user_info": self.user_info
                     }
                 }
             )
