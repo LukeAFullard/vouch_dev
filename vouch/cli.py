@@ -50,8 +50,22 @@ def gen_keys(args):
         private = args.name
         public = args.name + ".pub"
 
-    CryptoManager.generate_keys(private, public, password=args.password)
+    cert_path = None
+    if args.cert:
+        cert_path = public.replace(".pub", ".crt") if public.endswith(".pub") else public + ".crt"
+
+    CryptoManager.generate_keys(
+        private,
+        public,
+        password=args.password,
+        cert_path=cert_path,
+        days=args.days,
+        common_name=args.common_name,
+        organization=args.org
+    )
     print(f"Generated {private} and {public}")
+    if cert_path:
+        print(f"Generated Certificate {cert_path}")
 
 def init(args):
     """Initialize Vouch configuration and keys."""
@@ -123,6 +137,8 @@ def main():
     gen_keys_parser.add_argument("--password", help="Password for private key encryption")
     gen_keys_parser.add_argument("--cert", action="store_true", help="Generate an X.509 certificate instead of raw public key")
     gen_keys_parser.add_argument("--days", type=int, default=365, help="Validity period for certificate in days (default: 365)")
+    gen_keys_parser.add_argument("--common-name", help="Common Name (CN) for the certificate (e.g. your name)", default="vouch-generated-cert")
+    gen_keys_parser.add_argument("--org", help="Organization (O) for the certificate", default="Vouch User")
 
     # report
     report_parser = subparsers.add_parser("report", help="Generate an HTML or Markdown report")

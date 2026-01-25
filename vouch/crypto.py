@@ -23,7 +23,7 @@ class CryptoManager:
         )
 
     @staticmethod
-    def generate_keys(private_key_path, public_key_path, password=None, cert_path=None, days=365):
+    def generate_keys(private_key_path, public_key_path, password=None, cert_path=None, days=365, common_name="vouch-generated-cert", organization="Vouch User"):
         """
         Generates a new RSA key pair and optionally a self-signed certificate.
         """
@@ -59,8 +59,8 @@ class CryptoManager:
                 x509.NameAttribute(NameOID.COUNTRY_NAME, u"XX"),
                 x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"Vouch Audit"),
                 x509.NameAttribute(NameOID.LOCALITY_NAME, u"Vouch"),
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Vouch User"),
-                x509.NameAttribute(NameOID.COMMON_NAME, u"vouch-generated-cert"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
+                x509.NameAttribute(NameOID.COMMON_NAME, common_name),
             ])
             cert = x509.CertificateBuilder().subject_name(
                 subject
