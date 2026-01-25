@@ -35,40 +35,80 @@ class PIIDetector:
             text = pattern.sub(f"<PII: {name}>", text)
         return text
 
-    def sanitize(self, obj: Any) -> Any:
+    def sanitize(self, obj: Any, memo: Dict[int, Any] = None) -> Any:
         """
         Recursively sanitizes PII from the object.
         Returns a new object (copy) if modification is needed,
         or the original if immutable and safe.
         """
+        if memo is None:
+            memo = {}
+
+        obj_id = id(obj)
+        if obj_id in memo:
+            return memo[obj_id]
+
         if isinstance(obj, str):
-            return self._sanitize_string(obj)
+            res = self._sanitize_string(obj)
+            memo[obj_id] = res
+            return res
 
         if isinstance(obj, (list, tuple, set)):
             # Handle sequences
-            # Note: tuples/sets are immutable, so we must recreate them if content changes
-            sanitized_items = [self.sanitize(item) for item in obj]
+            # For lists, we can store placeholder to handle cycles
+            if isinstance(obj, list):
+                res = []
+                memo[obj_id] = res
+                for item in obj:
+                    res.append(self.sanitize(item, memo))
+                return res
 
+            # For tuples/sets, immutable, so cycle means infinite recursion usually
+            # unless we detect early. But we can't build partial tuple.
+            # So standard recursion limit applies, or we check if we are visiting.
+            # Python's repr cycle detection uses visited IDs.
+            # If we see it again, we can return a placeholder string.
+
+            # Simple check: if already processing this ID but not finished (not in memo),
+            # it is a cycle for immutable types that rely on construction.
+            # Actually standard python doesn't allow tuple to contain itself directly without mutable intermediary.
+            # So recursion usually goes through list/dict.
+
+            res_list = [self.sanitize(item, memo) for item in obj]
             if isinstance(obj, tuple):
-                return tuple(sanitized_items)
+                res = tuple(res_list)
+                memo[obj_id] = res
+                return res
             if isinstance(obj, set):
-                return set(sanitized_items)
-            return sanitized_items # list
+                # Sets are unordered, so just sanitize items
+                res = set(res_list)
+                memo[obj_id] = res
+                return res
 
         if isinstance(obj, dict):
-            # Handle dictionaries
-            return {
-                self.sanitize(key): self.sanitize(value)
-                for key, value in obj.items()
-            }
+            res = {}
+            memo[obj_id] = res
+            for key, value in obj.items():
+                res[self.sanitize(key, memo)] = self.sanitize(value, memo)
+            return res
 
-        # For other objects (int, float, custom classes), return as is
-        # We generally don't scan attributes of arbitrary classes to avoid
-        # breaking logic or infinite recursion, relying on Logger's repr/hash
-        # for them. But if __repr__ returns a string with PII, Logger handles
-        # repr separately.
-        # If the object ITSELF is PII (e.g. a custom EmailAddress object),
-        # this detector won't catch it unless it's converted to string first.
-        # But this method is called on args/kwargs before hashing.
+        # Primitives pass through
+        if isinstance(obj, (int, float, bool, type(None))):
+            return obj
 
-        return obj
+        # For custom objects, we can't safely modify them or deepcopy easily without issues.
+        # We rely on their __repr__ or __str__.
+        # Strategy: Return a string representation that IS sanitized.
+        # This changes the type of the object in the args list from Object -> String.
+        # This is acceptable for AUDIT LOGGING (we want safe representation),
+        # but might affect HASHING if the hasher expects the object structure.
+        # However, Logger.log_call calculates hash AFTER sanitization.
+        # So the hash will be of the string string representation.
+        # This effectively treats custom objects as their string representation for audit purposes.
+        try:
+            # We use str() as it's often more human readable, but repr() might be needed for details.
+            # Let's try repr first as it's standard for logging.
+            text_repr = repr(obj)
+            return self._sanitize_string(text_repr)
+        except Exception:
+            return "<PII: UNABLE_TO_SANITIZE_OBJECT>"
