@@ -125,5 +125,63 @@ class TestPII(unittest.TestCase):
         # Check args repr - should contain original
         self.assertIn("bob@example.com", call_log["args_repr"][0])
 
+    def test_cycle_detection(self):
+        # Create a list that contains itself
+        recursive_list = []
+        recursive_list.append(recursive_list)
+        recursive_list.append("alice@example.com")
+
+        # Should not crash with RecursionError
+        sanitized = self.detector.sanitize(recursive_list)
+
+        # Check structure
+        self.assertIsInstance(sanitized, list)
+        self.assertEqual(len(sanitized), 2)
+        # The first element should be the sanitized list itself (same object in python memory model?
+        # No, sanitize returns NEW objects. So it should be a reference to the new list)
+        self.assertIs(sanitized[0], sanitized)
+        self.assertEqual(sanitized[1], "<PII: EMAIL>")
+
+    def test_custom_object_sanitization(self):
+        class User:
+            def __init__(self, email):
+                self.email = email
+            def __repr__(self):
+                return f"User(email={self.email})"
+
+        user = User("bob@example.com")
+
+        # PII Detector should convert to sanitized string
+        sanitized = self.detector.sanitize(user)
+        self.assertEqual(sanitized, "User(email=<PII: EMAIL>)")
+
+    def test_logger_fail_safe(self):
+        # Force a sanitization failure by mocking
+        # We can't easily mock PIIDetector.sanitize inside Logger without patching
+        # But we can pass a special object that breaks the detector if we wanted.
+        # Alternatively, we can patch the pii_detector instance on the logger.
+
+        vch_path = os.path.join(self.test_dir, "failsafe.vch")
+        with TraceSession(vch_path, detect_pii=True, strict=False) as session:
+            # Monkey patch the detector to raise
+            def mock_sanitize(obj, memo=None):
+                raise ValueError("Boom")
+            session.logger.pii_detector.sanitize = mock_sanitize
+
+            session.logger.log_call("dangerous_func", ["secret"], {}, "result")
+
+        # Verify log contains placeholder
+        import zipfile
+        with zipfile.ZipFile(vch_path, 'r') as z:
+            with z.open("audit_log.json") as f:
+                content = f.read().decode('utf-8')
+
+        logs = [json.loads(line) for line in content.splitlines() if line.strip()]
+        log = next(l for l in logs if l["target"] == "dangerous_func")
+
+        # log_call uses safe_repr which wraps strings in quotes or <>
+        # If we pass a string tuple ("<SANITIZATION_FAILED>",), safe_repr quotes it: "'<SANITIZATION_FAILED>'"
+        self.assertEqual(log["args_repr"][0], "'<SANITIZATION_FAILED>'")
+
 if __name__ == '__main__':
     unittest.main()

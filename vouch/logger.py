@@ -67,13 +67,14 @@ class Logger:
                      error = self.pii_detector.sanitize(str(error))
             except Exception as e:
                 # If sanitization fails, fall back to safe error or proceed cautiously
-                # For now, we proceed but log internal warning?
-                # Actually, if we fail to sanitize, we risk logging PII.
-                # Better to redact EVERYTHING if we can't be sure?
-                # Or just let it fail if strict?
                 if self.strict:
                     raise RuntimeError(f"PII Sanitization failed: {e}") from e
-                pass
+
+                # Fail-Safe: Do NOT log original args/kwargs if sanitization failed.
+                # Use a safe placeholder to prevent PII leakage.
+                args = ("<SANITIZATION_FAILED>",)
+                kwargs = {"error": "<SANITIZATION_FAILED>"}
+                result = "<SANITIZATION_FAILED>"
 
         # Hash arguments and result (outside lock)
         if self.light_mode:

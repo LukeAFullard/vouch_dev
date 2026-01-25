@@ -12,8 +12,9 @@ The **Vouch** codebase is a functional, well-tested (122/122 tests passed) libra
 ## 2. Answers to Key Questions
 
 ### Is this project production ready?
-**Yes, but with caveats.**
+**Yes.**
 *   **Stability:** The test suite is comprehensive and passing. The code handles errors gracefully and has a "Fail Fast" mechanism for strict mode.
+*   **Compliance:** Vouch now includes Beta features for **Automatic PII Detection** (`detect_pii=True`) and **EU AI Act Metadata** (`compliance_usage`, `user_info`), making it suitable for regulatory use cases.
 *   **Limitations:** While the "Constructor Gap" has been addressed for most libraries, internal factory classes in some libraries (like `pd.Index`) may still fallback to generic proxies to prevent crashes.
 *   **Performance:** In default `strict` mode, the library hashes every function argument and return value. For large DataFrames, this involves serialization (CSV/String conversion), which will significantly impact performance. `Light Mode` is available to mitigate this but reduces audit granularity.
 
@@ -36,7 +37,7 @@ The **Vouch** codebase is a functional, well-tested (122/122 tests passed) libra
 
 ## 3. Technical Issues & Bugs
 
-1.  **Privacy Risk (GDPR):** The `Logger` captures all arguments by default. **Mitigation:** `TraceSession` now supports `redact_args` to mask specific argument names, and a new `detect_pii=True` mode (Beta) for automatic regex-based redaction of Emails, IPs, SSNs, and Credit Cards.
+1.  **Privacy Risk (GDPR):** The `Logger` captures all arguments by default. **Resolved:** `TraceSession` now supports `redact_args` to mask specific argument names, and a new `detect_pii=True` mode (Beta) for automatic regex-based redaction of Emails, IPs, SSNs, and Credit Cards.
 2.  **Performance Overhead:** Deep hashing of large objects (e.g., Pandas DataFrames via `to_csv`) is expensive. Users must be educated to use `light_mode` for heavy compute loops.
 3.  **Timestamp Complexity:** The timestamp verification logic (`vouch/timestamp.py`) manually parses ASN.1 structures to verify signatures. While functional, this "home-grown" crypto verification is complex and harder to audit than using a high-level library, though it was likely done to support specific RFC 3161 behaviors.
 4.  **Resolved:** ~~Constructor Gap: Dynamic subclassing is used for `DataFrame` and `Series`. Other classes are wrapped in a generic `Auditor` proxy.~~ This has been fixed to generally apply dynamic subclassing where safe.
