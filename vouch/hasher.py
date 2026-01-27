@@ -151,13 +151,18 @@ class Hasher:
                     return sha256.hexdigest()
                 except Exception as e:
                     # Fallback if json fails (e.g. keys are not strings)
-                    # We create a sorted representation manually
-                    # Sort by string representation of keys
+                    # We create a sorted representation manually using stable hashes of keys
                     try:
-                        items = []
-                        for k in sorted(obj.keys(), key=str):
-                            items.append(f"{repr(k)}: {repr(obj[k])}")
-                        s = "{" + ", ".join(items) + "}"
+                        keyed_items = []
+                        for k, v in obj.items():
+                            k_hash = Hasher.hash_object(k, raise_error=raise_error)
+                            v_hash = Hasher.hash_object(v, raise_error=raise_error)
+                            keyed_items.append((k_hash, v_hash))
+
+                        # Sort by key hash to ensure deterministic order
+                        keyed_items.sort(key=lambda x: x[0])
+
+                        s = "{" + ", ".join([f"{k}:{v}" for k, v in keyed_items]) + "}"
                         return hashlib.sha256(s.encode('utf-8')).hexdigest()
                     except Exception:
                         if raise_error: raise e

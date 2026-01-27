@@ -62,6 +62,9 @@ class Verifier:
 
         self.active_public_key = None
 
+        if strict and not trusted_public_key_path:
+             raise ValueError("Strict verification requires a trusted_public_key_path to prove identity.")
+
         if not os.path.exists(self.filepath):
             self._fail("file_exists", f"Error: File {self.filepath} not found.")
             return False

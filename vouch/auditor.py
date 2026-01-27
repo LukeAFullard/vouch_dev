@@ -48,6 +48,18 @@ class AuditorMixin:
                 if trigger in func_name: return True
         return False
 
+    def _safe_exists(self, path: Any) -> bool:
+        """Safely check if a path exists without crashing on invalid strings."""
+        if not isinstance(path, str):
+            return False
+        # Avoid stat on huge strings or those with null bytes
+        if len(path) > 4096 or '\0' in path:
+            return False
+        try:
+            return os.path.exists(path)
+        except (OSError, ValueError):
+            return False
+
     def _wrap_result(self, result, name_hint=""):
         """Helper to deeply wrap results if they belong to tracked packages."""
         if result is None:
@@ -120,7 +132,7 @@ class AuditorMixin:
         extra_hashes = {}
         # Naive implementation: check arg[0] and specific kwargs
 
-        if args and isinstance(args[0], str) and os.path.exists(args[0]):
+        if args and self._safe_exists(args[0]):
             try:
                 file_hash = Hasher.hash_file(args[0])
                 extra_hashes["arg_0_file_hash"] = file_hash
@@ -139,7 +151,7 @@ class AuditorMixin:
                 logger.error(f"Unexpected error hashing {args[0]}: {e}")
 
         for key, val in kwargs.items():
-                if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and isinstance(val, str) and os.path.exists(val):
+                if key in ["filepath", "path", "filename", "io", "filepath_or_buffer"] and self._safe_exists(val):
                     try:
                         file_hash = Hasher.hash_file(val)
                         extra_hashes[f"kwarg_{key}_file_hash"] = file_hash

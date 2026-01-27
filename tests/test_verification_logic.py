@@ -38,6 +38,11 @@ class TestVerificationLogic(unittest.TestCase):
         """
         self.create_dummy_vch()
 
+        # Create dummy trusted key for strict mode
+        trusted_key_path = os.path.join(self.temp_dir, "trusted.pem")
+        with open(trusted_key_path, "w") as f:
+            f.write("DUMMY")
+
         # Mock Crypto to pass signature check
         MockCrypto.load_public_key.return_value = MagicMock()
         MockCrypto.verify_file.return_value = None # No exception = success
@@ -50,7 +55,7 @@ class TestVerificationLogic(unittest.TestCase):
 
         # Test strict=True
         # It should fail because verify_timestamp returns False
-        result = verifier.verify(strict=True)
+        result = verifier.verify(strict=True, trusted_public_key_path=trusted_key_path)
         self.assertFalse(result, "Verification should fail if timestamp is invalid (strict=True)")
         self.assertIn("Timestamp Verification Failed", verifier.status["checks"]["timestamp"]["message"])
 
@@ -62,6 +67,11 @@ class TestVerificationLogic(unittest.TestCase):
         """
         self.create_dummy_vch()
 
+        # Create dummy trusted key for strict mode
+        trusted_key_path = os.path.join(self.temp_dir, "trusted.pem")
+        with open(trusted_key_path, "w") as f:
+            f.write("DUMMY")
+
         MockCrypto.load_public_key.return_value = MagicMock()
         MockCrypto.verify_file.return_value = None
 
@@ -71,7 +81,7 @@ class TestVerificationLogic(unittest.TestCase):
         verifier = Verifier(self.vch_path)
 
         # Test strict=True
-        result = verifier.verify(strict=True)
+        result = verifier.verify(strict=True, trusted_public_key_path=trusted_key_path)
         self.assertFalse(result, "Verification should fail on timestamp exception (strict=True)")
         self.assertIn("Timestamp Error: Simulated Error", verifier.status["checks"]["timestamp"]["message"])
 
