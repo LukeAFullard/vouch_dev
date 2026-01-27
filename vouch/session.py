@@ -228,6 +228,12 @@ class TraceSession:
             TraceSession._active_session.reset(self._token)
             if self.logger and hasattr(self.logger, "close"):
                 self.logger.close()
+
+            # Ensure tracked open is restored on failure
+            if self._original_open:
+                builtins.open = self._original_open
+                self._original_open = None
+
             if self.temp_dir and os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
             raise
@@ -569,10 +575,15 @@ class TraceSession:
         """
         manifest = {}
         data_dir = os.path.join(self.temp_dir, "data")
-        total = len(self.artifacts)
+
+        # Snapshot artifacts to avoid modification during iteration
+        with self._artifact_lock:
+            artifacts_snapshot = list(self.artifacts.items())
+
+        total = len(artifacts_snapshot)
         processed = 0
 
-        for name, src_path in self.artifacts.items():
+        for name, src_path in artifacts_snapshot:
             processed += 1
             if total > 10 and (processed % 5 == 0 or processed == total):
                 sys.stdout.write(f"\rPackaging artifacts... {processed}/{total}")

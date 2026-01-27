@@ -26,15 +26,26 @@ def verify(args):
         print(msg)
 
     verifier = Verifier(filepath)
-    success = verifier.verify(
-        data_file=args.data,
-        auto_data=args.auto_data,
-        auto_data_dir=args.auto_data_dir if args.auto_data_dir else ".",
-        tsa_ca_file=args.tsa_ca_file if hasattr(args, 'tsa_ca_file') else None,
-        strict=getattr(args, 'strict', False),
-        trusted_public_key_path=getattr(args, 'public_key', None),
-        reporter=cli_reporter
-    )
+
+    if not getattr(args, 'public_key', None):
+        print("WARNING: Verifying without a trusted public key (--public-key).")
+        print("         This verifies data integrity but NOT the author's identity.")
+        print("         For legal defensibility, you MUST use a trusted public key.")
+        print("")
+
+    try:
+        success = verifier.verify(
+            data_file=args.data,
+            auto_data=args.auto_data,
+            auto_data_dir=args.auto_data_dir if args.auto_data_dir else ".",
+            tsa_ca_file=args.tsa_ca_file if hasattr(args, 'tsa_ca_file') else None,
+            strict=getattr(args, 'strict', False),
+            trusted_public_key_path=getattr(args, 'public_key', None),
+            reporter=cli_reporter
+        )
+    except Exception as e:
+        print(f"Verification Error: {e}")
+        sys.exit(1)
 
     if success:
         print("Verification Successful.")
